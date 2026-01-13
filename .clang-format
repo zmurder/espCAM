@@ -1,0 +1,34 @@
+# ESP-IDF 项目 clang 格式化配置文件 - 中文说明
+Language: Cpp                    # 指定语言为 C++ (支持 C/C++ 混合项目)
+BasedOnStyle: Google            # 基于 Google 代码风格
+ColumnLimit: 120                # 单行最大字符数限制，超过则换行
+IndentWidth: 4                  # 缩进宽度为 4 个空格
+TabWidth: 4                     # Tab 字符显示宽度为 4 个空格
+UseTab: Never                   # 从不使用 Tab 字符，始终使用空格
+AccessModifierOffset: -2        # 访问修饰符 (public/private/protected) 向左缩进 2 个空格
+AlignAfterOpenBracket: Align    # 开括号后的内容进行对齐
+AlignOperands: true             # 操作数进行对齐排列
+AlignTrailingComments: true     # 尾随注释进行对齐
+AllowAllParametersOfDeclarationOnNextLine: true  # 允许将函数声明的所有参数放在下一行
+AllowShortFunctionsOnASingleLine: None          # 短函数不放在单行上，强制换行格式
+AlwaysBreakTemplateDeclarations: true           # 模板声明总是换行
+BinPackArguments: false         # 函数参数不打包到单行
+BinPackParameters: false        # 函数参数声明不打包到单行
+BreakBeforeTernaryOperators: true               # 三元运算符 (?:) 前换行
+BreakStringLiterals: true       # 长字符串字面量允许换行
+ConstructorInitializerIndentWidth: 4            # 构造函数初始化列表的缩进宽度
+ContinuationIndentWidth: 4      # 连续行的缩进宽度
+Cpp11BracedListStyle: true      # 使用 C++11 大括号列表初始化风格
+DerivePointerAlignment: false   # 不自动推导指针对齐方式，使用固定设置
+FixNamespaceComments: true      # 自动修正命名空间注释
+IndentCaseLabels: true          # switch 语句中的 case 标签进行缩进
+IndentPPDirectives: None        # 预处理指令 (#include 等) 不缩进
+MaxEmptyLinesToKeep: 100        # 保留大量空行，防止删除连续空行
+PointerAlignment: Left          # 指针符号 (*) 左对齐
+ReflowComments: true            # 重新排列注释内容
+SpaceBeforeAssignmentOperators: true            # 赋值运算符前添加空格
+SpaceBeforeParens: ControlStatements            # 控制语句 (if/for/while 等) 后添加空格
+SpacesBeforeTrailingComments: 2 # 尾随注释前保留 2 个空格
+Standard: c++11                 # 使用 C++11 标准 (适用于 ESP-IDF 的 C 语言主导特性)
+SortIncludes: false             # 不对 include 指令进行重新排序
+KeepEmptyLinesAtTheStartOfBlocks: true          # 在代码块开始处保留空行
