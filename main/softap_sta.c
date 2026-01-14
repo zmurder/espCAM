@@ -35,6 +35,8 @@
 #include "lwip/sys.h"
 
 #include "esp_camera.h"
+#include "camera_app.h"  // 添加相机应用头文件
+#include "udp_camera_client.h"
 
 /* The examples use WiFi configuration that you can set via project
    configuration menu.
@@ -252,4 +254,7 @@ void app_main(void) {
     if (esp_netif_napt_enable(esp_netif_ap) != ESP_OK) {
         ESP_LOGE(TAG_STA, "NAPT not enabled on the netif: %p", esp_netif_ap);
     }
+
+    camera_init();  // 初始化相机
+    start_udp_camera();  // 启动UDP图像传输
 }

@@ -1,7 +1,8 @@
+.clang-format
 # ESP-IDF 项目 clang 格式化配置文件 - 中文说明
 Language: Cpp                    # 指定语言为 C++ (支持 C/C++ 混合项目)
 BasedOnStyle: Google            # 基于 Google 代码风格
-ColumnLimit: 120                # 单行最大字符数限制，超过则换行
+ColumnLimit: 200                # 单行最大字符数限制，超过则换行
 IndentWidth: 4                  # 缩进宽度为 4 个空格
 TabWidth: 4                     # Tab 字符显示宽度为 4 个空格
 UseTab: Never                   # 从不使用 Tab 字符，始终使用空格
@@ -32,3 +33,5 @@ SpacesBeforeTrailingComments: 2 # 尾随注释前保留 2 个空格
 Standard: c++11                 # 使用 C++11 标准 (适用于 ESP-IDF 的 C 语言主导特性)
 SortIncludes: false             # 不对 include 指令进行重新排序
 KeepEmptyLinesAtTheStartOfBlocks: true          # 在代码块开始处保留空行
+BracedInitStyle: true          # 大括号初始化样式设置为 true
+BreakBeforeBraces: Allman      # 使用 Allman 风格，大括号总是在新行
