@@ -33,10 +33,15 @@
 
 #include "lwip/err.h"
 #include "lwip/sys.h"
+#include "esp_netif.h"
 
 #include "esp_camera.h"
 #include "camera_app.h"  // 添加相机应用头文件
 #include "udp_camera_client.h"
+#include "wifi_config_manager.h"  // 包含WiFi配置管理器头文件
+#include "led.h"
+
+// wifi_config_manager中已创建事件组，直接使用
 
 /* The examples use WiFi configuration that you can set via project
    configuration menu.
@@ -77,12 +82,15 @@
 /* The event group allows multiple bits for each event, but we only care about
  * two events:
  * - we are connected to the AP with an IP
- * - we failed to connect after the maximum amount of retries */
-#define WIFI_CONNECTED_BIT BIT0
-#define WIFI_FAIL_BIT BIT1
+ * - we failed to connect after the maximum amount of re-tries */
 
 /*DHCP server option*/
 #define DHCPS_OFFER_DNS 0x02
+
+/* 配置按键引脚（可修改为其它空闲 GPIO） */
+#ifndef WIFI_CONFIG_BUTTON_GPIO
+#define WIFI_CONFIG_BUTTON_GPIO 12  // 修改为GPIO12
+#endif
 
 static const char* TAG_AP = "WiFi SoftAP";
 static const char* TAG_STA = "WiFi Sta";
@@ -90,63 +98,86 @@ static const char* TAG_STA = "WiFi Sta";
 static int s_retry_num = 0;
 
 /* FreeRTOS event group to signal when we are connected/disconnected */
+// 使用wifi_config_manager中的事件组，避免重复创建
 static EventGroupHandle_t s_wifi_event_group;
+static esp_event_handler_instance_t s_app_wifi_start_inst = NULL;
+static esp_event_handler_instance_t s_app_wifi_disconn_inst = NULL;
+static esp_event_handler_instance_t s_app_ip_event_inst = NULL;
 
-static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
-    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STACONNECTED) {
-        wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*)event_data;
-        ESP_LOGI(TAG_AP, "Station " MACSTR " joined, AID=%d", MAC2STR(event->mac), event->aid);
-    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STADISCONNECTED) {
-        wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*)event_data;
-        ESP_LOGI(TAG_AP, "Station " MACSTR " left, AID=%d, reason:%d", MAC2STR(event->mac), event->aid, event->reason);
-    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data)
+{
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
         ESP_LOGI(TAG_STA, "Station started");
-    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+    }
+    else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        wifi_event_sta_disconnected_t* event = (wifi_event_sta_disconnected_t*)event_data;
+        ESP_LOGI(TAG_STA, "Station disconnected, reason:%d", event->reason);
+        if (s_retry_num < EXAMPLE_ESP_MAXIMUM_RETRY) {
+            esp_wifi_connect();
+            s_retry_num++;
+            ESP_LOGI(TAG_STA, "Retrying to connect to the AP (%d/%d)", s_retry_num, EXAMPLE_ESP_MAXIMUM_RETRY);
+        }
+        else {
+            xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+        }
+    }
+    else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*)event_data;
         ESP_LOGI(TAG_STA, "Got IP:" IPSTR, IP2STR(&event->ip_info.ip));
         s_retry_num = 0;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+        led_set_state(LED_STATE_ON);
     }
 }
 
 /* Initialize soft AP */
-esp_netif_t* wifi_init_softap(void) {
+esp_netif_t* wifi_init_softap(void)
+{
     esp_netif_t* esp_netif_ap = esp_netif_create_default_wifi_ap();
 
-    wifi_config_t wifi_ap_config = {
-        .ap =
-            {
-                .ssid = EXAMPLE_ESP_WIFI_AP_SSID,
-                .ssid_len = strlen(EXAMPLE_ESP_WIFI_AP_SSID),
-                .channel = EXAMPLE_ESP_WIFI_CHANNEL,
-                .password = EXAMPLE_ESP_WIFI_AP_PASSWD,
-                .max_connection = EXAMPLE_MAX_STA_CONN,
-                .authmode = WIFI_AUTH_WPA2_PSK,
-                .pmf_cfg =
-                    {
-                        .required = false,
-                    },
-            },
-    };
-
-    if (strlen(EXAMPLE_ESP_WIFI_AP_PASSWD) == 0) {
-        wifi_ap_config.ap.authmode = WIFI_AUTH_OPEN;
+    // 使用真实 MAC 的后三字节生成唯一 SSID
+    char ap_ssid[64];
+    uint8_t mac[6];
+    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) == ESP_OK) {
+        snprintf(ap_ssid, sizeof(ap_ssid), "esp32cam_%02X%02X%02X", mac[3], mac[4], mac[5]);
     }
+    else {
+        // 回退到随机/占位后缀
+        snprintf(ap_ssid, sizeof(ap_ssid), "esp32cam_%02X%02X%02X", 0x12, 0x34, 0x56);
+    }
+
+    wifi_config_t wifi_ap_config;
+    memset(&wifi_ap_config, 0, sizeof(wifi_config_t));
+
+    wifi_ap_config.ap.ssid_len = (uint8_t)strlen(ap_ssid);
+    wifi_ap_config.ap.channel = EXAMPLE_ESP_WIFI_CHANNEL;
+    wifi_ap_config.ap.max_connection = EXAMPLE_MAX_STA_CONN;
+    wifi_ap_config.ap.authmode = WIFI_AUTH_WPA2_PSK;
+
+    // 复制SSID到配置结构体
+    strncpy((char*)wifi_ap_config.ap.ssid, ap_ssid, sizeof(wifi_ap_config.ap.ssid) - 1);
+
+    // 复制密码到配置结构体
+    if (strlen(EXAMPLE_ESP_WIFI_AP_PASSWD) > 0) {
+        strncpy((char*)wifi_ap_config.ap.password, EXAMPLE_ESP_WIFI_AP_PASSWD, sizeof(wifi_ap_config.ap.password) - 1);
+    }
+    else {
+        wifi_ap_config.ap.authmode = WIFI_AUTH_OPEN;
+        wifi_ap_config.ap.password[0] = '\0';  // 无密码
+    }
+
 
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_ap_config));
 
-    ESP_LOGI(TAG_AP,
-             "wifi_init_softap finished. SSID:%s password:%s channel:%d",
-             EXAMPLE_ESP_WIFI_AP_SSID,
-             EXAMPLE_ESP_WIFI_AP_PASSWD,
-             EXAMPLE_ESP_WIFI_CHANNEL);
+    ESP_LOGI(TAG_AP, "wifi_init_softap finished. SSID:%s password:%s channel:%d", ap_ssid, EXAMPLE_ESP_WIFI_AP_PASSWD, EXAMPLE_ESP_WIFI_CHANNEL);
 
     return esp_netif_ap;
 }
 
 /* Initialize wifi station */
-esp_netif_t* wifi_init_sta(void) {
+esp_netif_t* wifi_init_sta(void)
+{
     esp_netif_t* esp_netif_sta = esp_netif_create_default_wifi_sta();
 
     wifi_config_t wifi_sta_config = {
@@ -175,18 +206,19 @@ esp_netif_t* wifi_init_sta(void) {
     return esp_netif_sta;
 }
 
-void softap_set_dns_addr(esp_netif_t* esp_netif_ap, esp_netif_t* esp_netif_sta) {
+void softap_set_dns_addr(esp_netif_t* esp_netif_ap, esp_netif_t* esp_netif_sta)
+{
     esp_netif_dns_info_t dns;
     esp_netif_get_dns_info(esp_netif_sta, ESP_NETIF_DNS_MAIN, &dns);
     uint8_t dhcps_offer_option = DHCPS_OFFER_DNS;
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_netif_dhcps_stop(esp_netif_ap));
-    ESP_ERROR_CHECK(esp_netif_dhcps_option(
-        esp_netif_ap, ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER, &dhcps_offer_option, sizeof(dhcps_offer_option)));
+    ESP_ERROR_CHECK(esp_netif_dhcps_option(esp_netif_ap, ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER, &dhcps_offer_option, sizeof(dhcps_offer_option)));
     ESP_ERROR_CHECK(esp_netif_set_dns_info(esp_netif_ap, ESP_NETIF_DNS_MAIN, &dns));
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_netif_dhcps_start(esp_netif_ap));
 }
 
-void app_main(void) {
+void app_main(void)
+{
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
@@ -201,16 +233,28 @@ void app_main(void) {
     /* Initialize event group */
     s_wifi_event_group = xEventGroupCreate();
 
-    /* Register Event handler */
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
-    ESP_ERROR_CHECK(
-        esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, NULL));
+    /* Initialize status LED on GPIO33, active low */
+    led_init(33, true);
+
+    /* Register Event handler and save instances for later unregistration */
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_START, &wifi_event_handler, NULL, &s_app_wifi_start_inst));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &wifi_event_handler, NULL, &s_app_wifi_disconn_inst));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, &s_app_ip_event_inst));
 
     /*Initialize WiFi */
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+
+    // // 若希望避免设备使用旧的 STA 凭据自动连接，可以在此处清空 STA 配置
+    // //（这只清除运行时配置，若 NVS 中有保存的凭据需另外清除）
+    // {
+    //     wifi_config_t empty_cfg = {0};
+    //     ESP_LOGI(TAG_STA, "Clearing runtime STA config to avoid automatic connect");
+    //     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &empty_cfg));
+    //     ESP_ERROR_CHECK(esp_wifi_disconnect());
+    // }
 
     /* Initialize AP */
     ESP_LOGI(TAG_AP, "ESP_WIFI_MODE_AP");
@@ -223,28 +267,37 @@ void app_main(void) {
     /* Start WiFi */
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    /*
-     * Wait until either the connection is established (WIFI_CONNECTED_BIT) or
-     * connection failed for the maximum number of re-tries (WIFI_FAIL_BIT).
-     * The bits are set by event_handler() (see above)
-     */
-    EventBits_t bits =
-        xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
+    // 初始化WiFi配置管理器，使用宏 WIFI_CONFIG_BUTTON_GPIO 指定的引脚作为配置按钮（默认为GPIO4），传入事件组和AP netif
+    ESP_ERROR_CHECK(wifi_config_manager_init(WIFI_CONFIG_BUTTON_GPIO, s_wifi_event_group, esp_netif_ap));
 
-    /* xEventGroupWaitBits() returns the bits before the call returned,
-     * hence we can test which event actually happened. */
-    if (bits & WIFI_CONNECTED_BIT) {
-        ESP_LOGI(
-            TAG_STA, "connected to ap SSID:%s password:%s", EXAMPLE_ESP_WIFI_STA_SSID, EXAMPLE_ESP_WIFI_STA_PASSWD);
-        softap_set_dns_addr(esp_netif_ap, esp_netif_sta);
-    } else if (bits & WIFI_FAIL_BIT) {
-        ESP_LOGI(TAG_STA,
-                 "Failed to connect to SSID:%s, password:%s",
-                 EXAMPLE_ESP_WIFI_STA_SSID,
-                 EXAMPLE_ESP_WIFI_STA_PASSWD);
-    } else {
-        ESP_LOGE(TAG_STA, "UNEXPECTED EVENT");
-        return;
+    /*
+     * If a compile-time STA SSID is configured, wait for connection result
+     * (WIFI_CONNECTED_BIT or WIFI_FAIL_BIT). If no compile-time SSID is set
+     * (we rely solely on NVS/portal), skip the blocking wait so device can
+     * continue to run provisioning portal and services immediately.
+     */
+    if (strlen(EXAMPLE_ESP_WIFI_STA_SSID) > 0) {
+        EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
+
+        /* xEventGroupWaitBits() returns the bits before the call returned,
+         * hence we can test which event actually happened. */
+        if (bits & WIFI_CONNECTED_BIT) {
+            ESP_LOGI(TAG_STA, "connected to ap SSID:%s password:%s", EXAMPLE_ESP_WIFI_STA_SSID, EXAMPLE_ESP_WIFI_STA_PASSWD);
+            softap_set_dns_addr(esp_netif_ap, esp_netif_sta);
+        }
+        else if (bits & WIFI_FAIL_BIT) {
+            ESP_LOGI(TAG_STA, "Failed to connect to SSID:%s, password:%s", EXAMPLE_ESP_WIFI_STA_SSID, EXAMPLE_ESP_WIFI_STA_PASSWD);
+            led_set_state(LED_STATE_BLINK_FAST);
+        }
+        else {
+            ESP_LOGE(TAG_STA, "UNEXPECTED EVENT");
+            return;
+        }
+    }
+    else {
+        ESP_LOGI(TAG_STA, "No compile-time STA SSID configured; skipping auto-connect wait.");
+        // 没有配置WiFi，LED快速闪烁提示用户需要配置
+        led_set_state(LED_STATE_BLINK_FAST);
     }
 
     /* Set sta as the default interface */
@@ -255,6 +308,18 @@ void app_main(void) {
         ESP_LOGE(TAG_STA, "NAPT not enabled on the netif: %p", esp_netif_ap);
     }
 
-    camera_init();  // 初始化相机
-    start_udp_camera();  // 启动UDP图像传输
+    // 初始化相机并检查返回值
+    esp_err_t camera_err = camera_init();
+    if (camera_err != ESP_OK) {
+        ESP_LOGE(TAG_STA, "Camera initialization failed: %s", esp_err_to_name(camera_err));
+        led_set_state(LED_STATE_BLINK_FAST);  // 相机初始化失败，快速闪烁LED
+        // 不启动UDP传输，但系统继续运行
+    }
+    else {
+        // 相机初始化成功，启动UDP图像传输
+        if (get_wifi_provisioning_mode() == false)  // 仅在非配置模式下启动
+        {
+            start_udp_camera();
+        }
+    }
 }

@@ -7,6 +7,16 @@
 void start_udp_camera(void);
 
 /**
+ * @brief 停止UDP图像传输
+ */
+void stop_udp_camera(void);
+
+/**
+ * @brief 重启UDP图像传输（在WiFi重置后调用）
+ */
+void restart_udp_camera(void);
+
+/**
  * @brief 获取当前帧率
  * @return 当前帧率 (FPS)
  */

@@ -1,13 +1,7 @@
 # This file was generated using idf.py save-defconfig. It can be edited manually.
+#
 # Espressif IoT Development Framework (ESP-IDF) Project Minimal Configuration
 #
-CONFIG_LWIP_IP_FORWARD=y
-CONFIG_LWIP_IPV4_NAPT=y
-
-# WiFi Configuration
-CONFIG_ESP_WIFI_AP_SSID="espCAM_WIFI"
-CONFIG_ESP_WIFI_AP_PASSWORD="12345678"
-CONFIG_ESP_WIFI_AP_CHANNEL=1
-CONFIG_ESP_WIFI_REMOTE_AP_SSID="ZTE-Zhao"
-CONFIG_ESP_WIFI_REMOTE_AP_PASSWORD="zyd83210"
-CONFIG_ESP_MAXIMUM_STA_RETRY=5
+# CONFIG_LWIP_IP_FORWARD=y
+# CONFIG_LWIP_IPV4_NAPT=y
+#
