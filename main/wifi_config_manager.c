@@ -120,34 +120,35 @@ static esp_err_t index_handler(httpd_req_t* req)
         "h1 { color: #333; text-align: center; }"
         "form { margin-top: 20px; }"
         "label { display: block; margin: 10px 0 5px; font-weight: bold; }"
-        "input[type='text'], input[type='password'] { width: 100%; padding: 10px; margin-bottom: 15px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }"
-        "button { background-color: #4CAF50; color: white; padding: 12px 20px; border: none; border-radius: 4px; cursor: tooltip; font-size: 16px; }"
+        "input[type='text'], input[type='password'], select { width: 100%; padding: 10px; margin-bottom: 15px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }"
+        "button { background-color: #4CAF50; color: white; padding: 12px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }"
         "button:hover { background-color: #45a049; }"
         ".scan-btn { background-color: #2196F3; color: white; padding: 12px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; margin-top: 10px; }"
         ".scan-btn:hover { background-color: #1a7fd9; }"
         ".status { margin-top: 20px; padding: 10px; border-radius: 4px; }"
         ".success { background-color: #dff0d8; color: #3c763d; }"
         ".error { background-color: #f2dede; color: #a94442; }"
-        ".scan-result { margin-top: 20px; padding: 15px; border-radius: 4px; border: 1px solid #ddd; background-color: #f9f9f9; }"
-        ".scan-item { padding: 10px; margin-bottom: 10px; border-bottom: 1px solid #eee; }"
-        ".scan-item:last-child { border-bottom: none; }"
-        ".scan-ssid { font-weight: bold; }"
-        ".scan-rssi { color: #666; font-size: 12px; }"
-        ".scan-auth { font-size: 12px; }"
+        ".scan-info { margin-top: 10px; padding: 10px; border-radius: 4px; background-color: #e3f2fd; font-size: 14px; }"
+        ".scan-info strong { color: #1976d2; }"
         "</style>"
         "</head>"
         "<body>"
         "<div class=\"container\">"
         "<h1>ESP32CAM WiFi Configuration</h1>"
-        "<p>请输入要连接的WiFi网络信息：</p>"
+        "<p>请输入或选择要连接的WiFi网络：</p>"
         "<button class=\"scan-btn\" onclick=\"scanWifi()\">扫描WiFi网络</button>"
-        "<div id=\"scanResult\" class=\"scan-result\" style=\"display:none;\"></div>"
+        "<div id=\"scanInfo\" class=\"scan-info\" style=\"display:none;\"></div>"
         "<form id=\"configForm\" action=\"/save_wifi\" method=\"post\">"
         "<label for=\"ssid\">WiFi名称 (SSID):</label>"
-        "<input type=\"text\" id=\"ssid\" name=\"ssid\" required>"
+        "<input type=\"text\" id=\"ssid\" name=\"ssid\" required placeholder=\"请输入WiFi名称或点击扫描按钮\">"
+
+        "<label for=\"wifiSelect\">或从扫描结果中选择：</label>"
+        "<select id=\"wifiSelect\" onchange=\"selectWifi()\">"
+        "<option value=\"\">-- 请先扫描WiFi网络 --</option>"
+        "</select>"
 
         "<label for=\"password\">WiFi密码:</label>"
-        "<input type=\"password\" id=\"password\" name=\"password\">"
+        "<input type=\"password\" id=\"password\" name=\"password\" placeholder=\"请输入WiFi密码\">"
 
         "<button type=\"submit\">保存并连接</button>"
         "</form>"
@@ -156,27 +157,48 @@ static esp_err_t index_handler(httpd_req_t* req)
 
         "<script>"
         "function scanWifi() {"
+        "    const scanBtn = document.querySelector('.scan-btn');"
+        "    scanBtn.disabled = true;"
+        "    scanBtn.textContent = '扫描中...';"
         "    fetch('/scan')"
         "    .then(response => response.json())"
         "    .then(data => {"
-        "        const resultDiv = document.getElementById('scanResult');"
-        "        resultDiv.style.display = 'block';"
+        "        const select = document.getElementById('wifiSelect');"
+        "        const infoDiv = document.getElementById('scanInfo');"
+        "        select.innerHTML = '<option value=\"\">-- 请选择WiFi网络 --</option>';"
         "        if (data.length > 0) {"
-        "            let html = '<div class=\"scan-result\">';"
-        "            html += '<h3>扫描到 ' + data.length + ' 个WiFi网络：</h3>';"
         "            for (let i = 0; i < data.length; i++) {"
-        "                html += '<div class=\"scan-item\">';"
-        "                html += '<span class=\"scan-ssid\">' + data[i].ssid + '</span><br>';"
-        "                html += '<span class=\"scan-rssi\">信号强度: ' + data[i].rssi + '</span>';"
-        "                html += '<span class=\"scan-auth\">认证: ' + (data[i].authmode == 0 ? 'Open' : 'WPA2') + '</span>';"
-        "                html += '</div>';"
+        "                const authText = data[i].authmode == 0 ? 'Open' : 'WPA2';"
+        "                const option = document.createElement('option');"
+        "                option.value = data[i].ssid;"
+        "                option.textContent = data[i].ssid + ' (' + authText + ', 信号: ' + data[i].rssi + ')';"
+        "                select.appendChild(option);"
         "            }"
-        "            html += '</div>';"
-        "            resultDiv.innerHTML = html;"
+        "            infoDiv.innerHTML = '<strong>扫描完成！</strong> 找到 ' + data.length + ' 个WiFi网络，请从下拉列表中选择。';"
+        "            infoDiv.style.display = 'block';"
         "        } else {"
-        "            resultDiv.innerHTML = '未扫描到WiFi网络';"
+        "            infoDiv.innerHTML = '<strong>未扫描到WiFi网络</strong>，请检查设备是否在WiFi覆盖范围内。';"
+        "            infoDiv.style.display = 'block';"
         "        }"
+        "    })"
+        "    .catch(error => {"
+        "        console.error('Scan error:', error);"
+        "        const infoDiv = document.getElementById('scanInfo');"
+        "        infoDiv.innerHTML = '<strong>扫描失败：</strong> ' + error.message;"
+        "        infoDiv.style.display = 'block';"
+        "    })"
+        "    .finally(() => {"
+        "        scanBtn.disabled = false;"
+        "        scanBtn.textContent = '扫描WiFi网络';"
         "    });"
+        "}"
+        "function selectWifi() {"
+        "    const select = document.getElementById('wifiSelect');"
+        "    const ssidInput = document.getElementById('ssid');"
+        "    const selectedValue = select.value;"
+        "    if (selectedValue) {"
+        "        ssidInput.value = selectedValue;"
+        "    }"
         "}"
         "document.getElementById('configForm').addEventListener('submit', function(e) {"
         "    e.preventDefault();"
@@ -280,8 +302,10 @@ static esp_err_t save_wifi_handler(httpd_req_t* req)
 
     httpd_resp_set_type(req, "application/json");
     if (conn_res == ESP_OK) {
-        httpd_resp_sendstr(req, "{\"success\": true, \"message\": \"Connected to WiFi\"}");
-        // 成功连接后停止配置模式
+        httpd_resp_sendstr(req, "{\"success\": true, \"message\": \"Connected to WiFi, device will restart\"}");
+        // 先创建重启任务
+        xTaskCreate(restart_task, "restart_task", 4096, NULL, 5, NULL);
+        // 然后停止配置模式
         stop_provisioning_mode();
     }
     else {
@@ -433,7 +457,7 @@ static esp_err_t start_webserver(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.uri_match_fn = httpd_uri_match_wildcard;
-    config.max_open_sockets = 5;  // 增加最大连接数
+    config.max_open_sockets = 5;   // 增加最大连接数
     config.max_uri_handlers = 16;  // 增加URI处理器槽位
     config.task_priority = tskIDLE_PRIORITY + 5;
     config.stack_size = 8192;  // 增加HTTP服务器任务栈大小
@@ -590,6 +614,10 @@ static void start_provisioning_mode(void)
     stop_udp_camera();
     // 配置模式下快速闪烁
     led_set_state(LED_STATE_BLINK_FAST);
+
+    // 断开STA连接，避免与AP功能冲突
+    esp_wifi_disconnect();
+    ESP_LOGI(TAG, "Disconnected from STA network");
 
     // 初始化mDNS
     mdns_init();

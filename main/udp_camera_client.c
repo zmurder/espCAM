@@ -275,8 +275,8 @@ void restart_udp_camera(void)
     // 等待任务完全停止
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    // // 重新启动
-    // start_udp_camera();
+    // 重新启动
+    start_udp_camera();
 }
 
 /**
