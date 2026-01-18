@@ -25,6 +25,7 @@
 #include "mdns.h"
 
 #include "esp_err.h"
+#include "dns_server.h"
 #include "wifi_config_manager.h"
 #include "wifi_manager.h"
 #include "esp_mac.h"
@@ -77,9 +78,10 @@ static void IRAM_ATTR button_isr_handler(void* arg)
     }
 }
 
-// 配置模式WiFi事件处理器
+// 配置模式WiFi事件处理器 - 只处理AP相关事件
 static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data)
 {
+    // 在配置模式下只处理AP相关事件，忽略STA事件以防止自动重连
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STACONNECTED) {
         wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*)event_data;
         ESP_LOGI(TAG, "Station %02x:%02x:%02x:%02x:%02x:%02x joined, AID=%d", event->mac[0], event->mac[1], event->mac[2], event->mac[3], event->mac[4], event->mac[5], event->aid);
@@ -93,16 +95,7 @@ static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base, int3
         ip_event_ap_staipassigned_t* event = (ip_event_ap_staipassigned_t*)event_data;
         ESP_LOGI(TAG, "Station assigned IP: " IPSTR, IP2STR(&event->ip));
     }
-    else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        ESP_LOGI(TAG, "Station started");
-    }
-    else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        ip_event_got_ip_t* event = (ip_event_got_ip_t*)event_data;
-        ESP_LOGI(TAG, "Got IP:" IPSTR, IP2STR(&event->ip_info.ip));
-    }
-    else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_LOST_IP) {
-        ESP_LOGI(TAG, "Lost IP");
-    }
+    // 移除STA事件处理，防止在配置模式下自动重连到之前的WiFi网络
 }
 
 // HTTP请求处理函数
@@ -612,9 +605,22 @@ static void start_provisioning_mode(void)
     // 配置模式下快速闪烁
     led_set_state(LED_STATE_BLINK_FAST);
 
+    // 注销WiFi事件处理器，防止自动重连
+    wifi_unregister_event_handlers();
+    ESP_LOGI(TAG, "Unregistered WiFi event handlers to prevent auto-reconnect");
+
     // 断开STA连接，避免与AP功能冲突
     esp_wifi_disconnect();
     ESP_LOGI(TAG, "Disconnected from STA network");
+
+    // 配置DHCP服务器，将DNS服务器地址设置为AP的IP地址
+    if (s_ap_netif) {
+        esp_netif_dns_info_t dns_info;
+        dns_info.ip.u_addr.ip4.addr = htonl(0xC0A80401);  // 192.168.4.1
+        dns_info.ip.type = ESP_IPADDR_TYPE_V4;
+        esp_netif_dhcps_option(s_ap_netif, ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER, &dns_info, sizeof(dns_info));
+        ESP_LOGI(TAG, "DHCP DNS server set to 192.168.4.1");
+    }
 
     // 初始化mDNS
     mdns_init();
@@ -658,6 +664,16 @@ static void start_provisioning_mode(void)
         ESP_LOGI(TAG, "Provisioning AP IP: " IPSTR, IP2STR(&s_ap_ip_info.ip));
     }
 
+    // 启动DNS服务器（DNS劫持，将所有DNS查询重定向到AP IP）
+    dns_server_init();
+    dns_server_start();
+    ESP_LOGI(TAG, "DNS server started - all DNS queries will be redirected to AP IP");
+
+    // 先停止HTTP服务器（如果已运行），然后重新启动
+    if (s_server != NULL) {
+        stop_webserver();
+        s_server = NULL;
+    }
     // 启动HTTP服务器
     start_webserver();
 
@@ -677,6 +693,13 @@ static void stop_provisioning_mode(void)
 
     stop_webserver();
 
+    // 停止DNS服务器
+    dns_server_stop();
+    ESP_LOGI(TAG, "DNS server stopped");
+
+    // 重新注册WiFi事件处理器，恢复STA自动重连功能
+    wifi_register_event_handlers(NULL);
+    ESP_LOGI(TAG, "Re-registered WiFi event handlers");
 
     // 重启UDP图像传输（WiFi已重新连接）
     restart_udp_camera();
