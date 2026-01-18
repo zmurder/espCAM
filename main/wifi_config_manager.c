@@ -26,6 +26,7 @@
 
 #include "esp_err.h"
 #include "wifi_config_manager.h"
+#include "wifi_manager.h"
 #include "esp_mac.h"
 #include "led.h"
 #include "udp_camera_client.h"
@@ -53,8 +54,6 @@ static bool s_isr_service_installed = false;  // 标记ISR服务是否已安装
 /* WiFi扫描相关变量 */
 #define MAX_SCAN_RESULTS 20
 
-/* 由 app_main 创建并传入，避免模块间重复创建事件组 */
-static EventGroupHandle_t s_wifi_event_group = NULL;
 
 static void wifi_config_check_button_task(void* arg);
 static void start_provisioning_mode(void);
@@ -498,8 +497,6 @@ esp_err_t wifi_config_manager_init(int button_gpio, EventGroupHandle_t event_gro
 {
     s_button_gpio = button_gpio;
 
-    /* 保存外部传入的事件组句柄供本模块使用 */
-    s_wifi_event_group = event_group;
     /* 保存外部传入的 AP netif 句柄 */
     s_ap_netif = ap_netif;
 
@@ -861,12 +858,13 @@ static esp_err_t wifi_connect_to_ap(const char* ssid, const char* password)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_connect());
 
-    if (s_wifi_event_group == NULL) {
-        ESP_LOGW(TAG, "No event group provided; returning after esp_wifi_connect");
+    EventGroupHandle_t event_group = wifi_get_event_group();
+    if (event_group == NULL) {
+        ESP_LOGW(TAG, "No event group available; returning after esp_wifi_connect");
         return ESP_OK;
     }
 
-    EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
+    EventBits_t bits = xEventGroupWaitBits(event_group,
                                            WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
                                            pdFALSE,
                                            pdFALSE,
