@@ -39,6 +39,13 @@ esp_err_t dns_server_stop(void);
  */
 bool dns_server_is_running(void);
 
+/**
+ * @brief 设置DNS服务器的AP IP地址
+ * @param ap_ip AP IP地址（网络字节序）
+ * @return ESP_OK on success
+ */
+esp_err_t dns_server_set_ap_ip(uint32_t ap_ip);
+
 #ifdef __cplusplus
 }
 #endif

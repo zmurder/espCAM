@@ -66,6 +66,8 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
         }
         else {
             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+            // 播放WiFi连接失败语音提示
+            // audio_player_play_wifi_status(1); // 1表示连接失败
         }
     }
     else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
@@ -73,6 +75,8 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
         ESP_LOGI(TAG_STA, "Got IP:" IPSTR, IP2STR(&event->ip_info.ip));
         s_retry_num = 0;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+        // 播放WiFi连接成功语音提示
+        // audio_player_play_wifi_status(0); // 0表示连接成功
     }
 }
 

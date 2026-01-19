@@ -13,6 +13,7 @@
 #include "esp_wifi.h"
 #include <stdbool.h>
 #include "freertos/event_groups.h"
+#include "audio_player.h"
 
 #ifdef __cplusplus
 extern "C" {

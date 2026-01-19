@@ -7,16 +7,22 @@
 #include "esp_camera.h"
 #include "esp_wifi.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
 #include "lwip/inet.h"
 #include "led.h"
+#include "driver/i2s.h"
 
 #include "udp_camera_client.h"
+#include "audio_player.h"  // 添加音频播放模块
 
 static const char* TAG = "UDP_CAMERA";
 
 // 目标PC的IP地址和端口
 #define UDP_SERVER_IP "192.168.5.3"  // 替换为你的PC的IP地址，请根据实际情况修改
 #define UDP_SERVER_PORT 8080
+
+// PC发送语音的端口
+#define UDP_AUDIO_PORT 8081
 
 // UDP相关参数
 #define MAX_UDP_PACKET_SIZE 1400  // MTU限制
@@ -31,6 +37,15 @@ typedef struct
     uint8_t data[MAX_UDP_PACKET_SIZE - sizeof(uint32_t) * 3];  // 数据区域
 } udp_image_chunk_t;
 
+// 音频数据包结构
+typedef struct
+{
+    uint32_t packet_id;                                        // 音频包序号
+    uint32_t total_packets;                                    // 音频总包数
+    uint32_t audio_size;                                       // 音频总大小
+    uint8_t data[MAX_UDP_PACKET_SIZE - sizeof(uint32_t) * 3];  // 音频数据区域
+} udp_audio_chunk_t;
+
 // 帧率统计相关变量
 static uint32_t frame_count = 0;
 static uint32_t last_fps_time = 0;
@@ -38,8 +53,10 @@ static float current_fps = 0.0f;
 
 // UDP socket 复用，避免重复创建
 static int s_udp_socket = -1;
+static int s_audio_socket = -1;  // 新增音频接收socket
 static struct sockaddr_in s_dest_addr;
 static bool s_socket_initialized = false;
+static bool s_audio_socket_initialized = false;
 
 // 任务控制标志
 static TaskHandle_t s_udp_task_handle = NULL;
@@ -86,6 +103,131 @@ static esp_err_t init_udp_socket_once(void)
 }
 
 /**
+ * @brief 初始化音频接收socket
+ *
+ * @return esp_err_t
+ */
+static esp_err_t init_audio_socket(void)
+{
+    if (s_audio_socket_initialized && s_audio_socket >= 0) {
+        return ESP_OK;  // Socket已初始化，直接返回
+    }
+
+    s_audio_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (s_audio_socket < 0) {
+        ESP_LOGE(TAG, "创建音频接收socket失败: errno %d", errno);
+        return ESP_FAIL;
+    }
+
+    // 设置接收超时
+    struct timeval timeout;
+    timeout.tv_sec = 5;  // 5秒超时
+    timeout.tv_usec = 0;
+    setsockopt(s_audio_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
+    // 绑定到本地端口
+    struct sockaddr_in local_addr;
+    local_addr.sin_family = AF_INET;
+    local_addr.sin_port = htons(UDP_AUDIO_PORT);
+    local_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+    if (bind(s_audio_socket, (struct sockaddr*)&local_addr, sizeof(local_addr)) < 0) {
+        ESP_LOGE(TAG, "绑定音频端口失败: errno %d", errno);
+        close(s_audio_socket);
+        s_audio_socket = -1;
+        return ESP_FAIL;
+    }
+
+    s_audio_socket_initialized = true;
+    ESP_LOGI(TAG, "音频接收socket初始化成功，监听端口: %d", UDP_AUDIO_PORT);
+
+    return ESP_OK;
+}
+
+/**
+ * @brief 处理音频数据包
+ *
+ * @param audio_packet 音频数据包
+ * @param packet_size 数据包大小
+ */
+static void handle_audio_packet(udp_audio_chunk_t* audio_packet, size_t packet_size)
+{
+    if (audio_packet == NULL) {
+        return;
+    }
+
+    // 解析音频包信息
+    uint32_t packet_id = ntohl(audio_packet->packet_id);
+    uint32_t total_packets = ntohl(audio_packet->total_packets);
+    uint32_t audio_size = ntohl(audio_packet->audio_size);
+
+    ESP_LOGI(TAG, "收到音频包，ID: %lu/%lu, 音频大小: %lu bytes",
+             (unsigned long)packet_id,
+             (unsigned long)total_packets,
+             (unsigned long)audio_size);
+
+    // 播放音频数据
+    size_t actual_data_size = packet_size - sizeof(uint32_t) * 3;
+    if (actual_data_size > 0) {
+        esp_err_t ret = audio_player_play_stream(audio_packet->data, actual_data_size);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "播放音频数据失败: %s", esp_err_to_name(ret));
+        }
+    }
+}
+
+/**
+ * @brief 音频接收任务
+ *
+ * @param pvParameters 参数
+ */
+static void audio_receive_task(void* pvParameters)
+{
+    // 从堆中分配接收缓冲区，减少栈使用
+    uint8_t* recv_buffer = heap_caps_malloc(MAX_UDP_PACKET_SIZE, MALLOC_CAP_DMA);
+    if (recv_buffer == NULL) {
+        ESP_LOGE(TAG, "无法分配音频接收缓冲区");
+        return;
+    }
+
+    struct sockaddr_in source_addr;
+    socklen_t addr_len = sizeof(source_addr);
+
+    ESP_LOGI(TAG, "音频接收任务启动，监听端口: %d", UDP_AUDIO_PORT);
+
+    while (s_udp_task_running) {
+        int len = recvfrom(s_audio_socket, recv_buffer, MAX_UDP_PACKET_SIZE, 0,
+                           (struct sockaddr*)&source_addr, &addr_len);
+
+        if (len < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                continue;  // 超时，继续循环
+            }
+            ESP_LOGE(TAG, "音频接收错误: errno %d", errno);
+            vTaskDelay(pdMS_TO_TICKS(100));  // 错误后短暂延迟
+            continue;
+        }
+
+        // 尝试解析为音频数据包
+        if (len >= sizeof(udp_audio_chunk_t)) {
+            udp_audio_chunk_t* audio_pkt = (udp_audio_chunk_t*)recv_buffer;
+            handle_audio_packet(audio_pkt, len);
+        } else {
+            // 收到的数据包太小，可能是原始音频数据
+            ESP_LOGD(TAG, "收到原始音频数据: %d bytes", len);
+            esp_err_t ret = audio_player_play_stream(recv_buffer, len);
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "播放原始音频数据失败: %s", esp_err_to_name(ret));
+            }
+        }
+    }
+
+    ESP_LOGI(TAG, "音频接收任务结束");
+    heap_caps_free(recv_buffer);  // 释放接收缓冲区
+    vTaskDelete(NULL);
+}
+
+/**
  * @brief 关闭UDP socket
  */
 static void close_udp_socket(void)
@@ -95,6 +237,19 @@ static void close_udp_socket(void)
         s_udp_socket = -1;
         s_socket_initialized = false;
         ESP_LOGI(TAG, "UDP socket已关闭");
+    }
+}
+
+/**
+ * @brief 关闭音频socket
+ */
+static void close_audio_socket(void)
+{
+    if (s_audio_socket >= 0) {
+        close(s_audio_socket);
+        s_audio_socket = -1;
+        s_audio_socket_initialized = false;
+        ESP_LOGI(TAG, "音频socket已关闭");
     }
 }
 
@@ -118,8 +273,10 @@ esp_err_t send_image_via_udp(camera_fb_t* fb)
 
     ESP_LOGI(TAG, "开始发送图像，大小: %lu bytes, 分 %lu 包", (unsigned long)total_size, (unsigned long)total_chunks);
 
+    // 使用静态变量避免栈上分配大数组
+    static udp_image_chunk_t chunk;
+
     while (bytes_sent < total_size) {
-        udp_image_chunk_t chunk;
         chunk.chunk_id = htonl(chunk_idx);
         chunk.total_chunks = htonl(total_chunks);
         chunk.image_size = htonl(total_size);
@@ -223,6 +380,14 @@ void udp_camera_task(void* pvParameters)
 
     s_udp_task_running = true;
 
+    // 初始化音频接收socket
+    if (init_audio_socket() != ESP_OK) {
+        ESP_LOGE(TAG, "音频socket初始化失败");
+    } else {
+        // 启动音频接收任务
+        xTaskCreate(audio_receive_task, "audio_receive_task", 4096, NULL, 5, NULL);
+    }
+
     while (s_udp_task_running) {
         uint64_t start_time = esp_timer_get_time();
 
@@ -261,6 +426,7 @@ void stop_udp_camera(void)
     ESP_LOGI(TAG, "停止UDP图像传输");
     s_udp_task_running = false;
     close_udp_socket();
+    close_audio_socket();
 }
 
 /**

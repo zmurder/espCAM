@@ -28,6 +28,7 @@ static const char* TAG = "dns_server";
 static bool s_dns_server_running = false;
 static TaskHandle_t s_dns_task_handle = NULL;
 static int s_dns_socket = -1;
+static uint32_t s_ap_ip = 0xC0A80401;  // 默认192.168.4.1
 
 // DNS header structure
 #pragma pack(push, 1)
@@ -153,14 +154,19 @@ static void dns_server_task(void* pvParameters)
                         answer->class = htons(1);  // IN类
                         answer->ttl = htonl(60);  // TTL 60秒
                         answer->length = htons(4);  // IPv4地址长度
-                        answer->addr = htonl(0xC0A80401);  // 192.168.4.1
+                        answer->addr = s_ap_ip;  // 使用动态AP IP
 
                         tx_len += sizeof(dns_answer_t);
 
                         // 发送响应
                         int tolen = sizeof(source_addr);
                         int sent = sendto(sock, tx_buffer, tx_len, 0, (struct sockaddr*)&source_addr, tolen);
-                        ESP_LOGI(TAG, "DNS query from %s, responded with 192.168.4.1, sent %d bytes", addr_str, sent);
+                        
+                        // 将uint32_t转换为esp_ip4_addr_t用于打印
+                        esp_ip4_addr_t ip_addr;
+                        ip_addr.addr = s_ap_ip;
+                        
+                        ESP_LOGI(TAG, "DNS query from %s, responded with " IPSTR ", sent %d bytes", addr_str, IP2STR(&ip_addr), sent);
                     }
                 }
             }
@@ -238,4 +244,16 @@ esp_err_t dns_server_stop(void)
 bool dns_server_is_running(void)
 {
     return s_dns_server_running;
+}
+
+esp_err_t dns_server_set_ap_ip(uint32_t ap_ip)
+{
+    s_ap_ip = ap_ip;
+    
+    // 将uint32_t转换为esp_ip4_addr_t用于打印
+    esp_ip4_addr_t ip_addr;
+    ip_addr.addr = ap_ip;
+    
+    ESP_LOGI(TAG, "DNS server AP IP set to: " IPSTR, IP2STR(&ip_addr));
+    return ESP_OK;
 }

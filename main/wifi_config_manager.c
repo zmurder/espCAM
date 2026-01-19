@@ -32,10 +32,10 @@
 #include "led.h"
 #include "udp_camera_client.h"
 #include "esp_task_wdt.h"
+#include "audio_player.h"  // 添加音频播放模块
 
 static const char* TAG = "wifi_config";
 
-#define WIFI_CONFIG_BUTTON_GPIO 12               // 默认使用GPIO0，即开发板上的BOOT按钮
 #define WIFI_PROV_HOLD_TIME pdMS_TO_TICKS(5000)  // 长按5秒进入配置模式
 #define WIFI_CONFIG_NAMESPACE "wifi_config"
 #define WIFI_CONFIG_SSID_KEY "ssid"
@@ -44,7 +44,7 @@ static const char* TAG = "wifi_config";
 #define PROV_AP_CHANNEL 1
 #define PROV_AP_SSID_PREFIX "esp32cam_config"
 
-static int s_button_gpio = WIFI_CONFIG_BUTTON_GPIO;
+static int s_button_gpio = -1;  // 初始化为-1，由 wifi_config_manager_init() 设置
 static bool s_provisioning_mode = false;
 static TaskHandle_t s_prov_task_handle = NULL;
 static httpd_handle_t s_server = NULL;
@@ -55,6 +55,9 @@ static bool s_isr_service_installed = false;  // 标记ISR服务是否已安装
 /* WiFi扫描相关变量 */
 #define MAX_SCAN_RESULTS 20
 
+// 添加函数声明
+static esp_err_t test_wifi_handler(httpd_req_t* req);
+static esp_err_t wifi_connect_to_ap_test(const char* ssid, const char* password);
 
 static void wifi_config_check_button_task(void* arg);
 static void start_provisioning_mode(void);
@@ -98,7 +101,104 @@ static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base, int3
     // 移除STA事件处理，防止在配置模式下自动重连到之前的WiFi网络
 }
 
-// HTTP请求处理函数
+// 添加WiFi连接测试函数
+static esp_err_t wifi_connect_to_ap_test(const char* ssid, const char* password)
+{
+    wifi_config_t wifi_config = {0};
+    strncpy((char*)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid) - 1);
+    if (password && strlen(password) > 0) {
+        strncpy((char*)wifi_config.sta.password, password, sizeof(wifi_config.sta.password) - 1);
+    }
+    
+    // 设置临时配置
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_connect());
+
+    EventGroupHandle_t event_group = wifi_get_event_group();
+    if (event_group == NULL) {
+        return ESP_FAIL;
+    }
+
+    // 等待连接结果，最多等待8秒
+    EventBits_t bits = xEventGroupWaitBits(event_group,
+                                          WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
+                                          pdFALSE,
+                                          pdFALSE,
+                                          pdMS_TO_TICKS(8000)
+    );
+
+    bool connected = (bits & WIFI_CONNECTED_BIT) != 0;
+    
+    // 断开测试连接，恢复原有配置
+    esp_wifi_disconnect();
+    
+    return connected ? ESP_OK : ESP_FAIL;
+}
+
+// 添加测试连接的HTTP处理器
+static esp_err_t test_wifi_handler(httpd_req_t* req)
+{
+    static char content[200];
+    int ret, remaining = req->content_len;
+
+    wifi_credentials_t creds = {0};
+
+    // 读取请求体
+    while (remaining > 0) {
+        ret = httpd_req_recv(req, content, MIN(remaining, sizeof(content) - 1));
+        if (ret <= 0) {
+            if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+                continue;
+            }
+            return ESP_FAIL;
+        }
+        content[ret] = '\0';
+        break;
+    }
+
+    // 解析JSON
+    cJSON* root = cJSON_Parse(content);
+    if (!root) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_sendstr(req, "{\"success\": false, \"message\": \"Invalid JSON\"}");
+        return ESP_OK;
+    }
+
+    cJSON* ssid_json = cJSON_GetObjectItem(root, "ssid");
+    cJSON* pass_json = cJSON_GetObjectItem(root, "password");
+
+    if (!ssid_json || !cJSON_IsString(ssid_json)) {
+        cJSON_Delete(root);
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_sendstr(req, "{\"success\": false, \"message\": \"SSID is required\"}");
+        return ESP_OK;
+    }
+
+    strncpy(creds.ssid, ssid_json->valuestring, sizeof(creds.ssid) - 1);
+    if (pass_json && cJSON_IsString(pass_json)) {
+        strncpy(creds.password, pass_json->valuestring, sizeof(creds.password) - 1);
+    }
+    else {
+        creds.password[0] = '\0';  // 空密码
+    }
+
+    cJSON_Delete(root);
+
+    // 测试连接到新网络
+    esp_err_t conn_res = wifi_connect_to_ap_test(creds.ssid, creds.password);
+
+    httpd_resp_set_type(req, "application/json");
+    if (conn_res == ESP_OK) {
+        httpd_resp_sendstr(req, "{\"success\": true, \"message\": \"Connected successfully\"}");
+    }
+    else {
+        httpd_resp_sendstr(req, "{\"success\": false, \"message\": \"Connection failed\"}");
+    }
+
+    return ESP_OK;
+}
+
+// 修改 index_handler 函数以添加移动端适配和连接测试功能
 static esp_err_t index_handler(httpd_req_t* req)
 {
     static const char html_response[] =
@@ -106,35 +206,46 @@ static esp_err_t index_handler(httpd_req_t* req)
         "<html>"
         "<head><title>ESP32CAM WiFi Configuration</title>"
         "<meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, user-scalable=no\">"
         "<style>"
-        "body { font-family: Arial, sans-serif; margin: 40px; background-color: #f0f0f0; }"
-        ".container { max-width: 600px; margin: 0 auto; background-color: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }"
-        "h1 { color: #333; text-align: center; }"
-        "form { margin-top: 20px; }"
-        "label { display: block; margin: 10px 0 5px; font-weight: bold; }"
-        "input[type='text'], input[type='password'], select { width: 100%; padding: 10px; margin-bottom: 15px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }"
-        "button { background-color: #4CAF50; color: white; padding: 12px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }"
+        "body { font-family: Arial, sans-serif; margin: 0; padding: 10px; background-color: #f0f0f0; }"
+        ".container { max-width: 100%; margin: 0 auto; background-color: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }"
+        "h1 { color: #333; text-align: center; font-size: 1.4em; margin-top: 0; }"
+        "p { text-align: center; font-size: 0.9em; color: #666; }"
+        "form { margin-top: 15px; }"
+        "label { display: block; margin: 10px 0 5px; font-weight: bold; font-size: 0.9em; }"
+        "input[type='text'], input[type='password'], select { width: 100%; padding: 12px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 16px; }"
+        "button { background-color: #4CAF50; color: white; padding: 12px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; width: 100%; margin-bottom: 8px; }"
         "button:hover { background-color: #45a049; }"
-        ".scan-btn { background-color: #2196F3; color: white; padding: 12px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; margin-top: 10px; }"
-        ".scan-btn:hover { background-color: #1a7fd9; }"
-        ".status { margin-top: 20px; padding: 10px; border-radius: 4px; }"
+        ".test-btn { background-color: #2196F3; }"
+        ".test-btn:hover { background-color: #1a7fd9; }"
+        ".save-btn { background-color: #4CAF50; }"
+        ".save-btn:hover { background-color: #45a049; }"
+        ".scan-btn { background-color: #FF9800; color: white; padding: 12px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; width: 100%; margin-bottom: 15px; }"
+        ".scan-btn:hover { background-color: #e68900; }"
+        ".status { margin-top: 15px; padding: 12px; border-radius: 4px; font-size: 0.9em; display: none; }"
         ".success { background-color: #dff0d8; color: #3c763d; }"
         ".error { background-color: #f2dede; color: #a94442; }"
-        ".scan-info { margin-top: 10px; padding: 10px; border-radius: 4px; background-color: #e3f2fd; font-size: 14px; }"
+        ".scan-info { margin-top: 10px; padding: 10px; border-radius: 4px; background-color: #e3f2fd; font-size: 0.9em; display: none; }"
         ".scan-info strong { color: #1976d2; }"
+        "@media screen and (max-width: 600px) {"
+        "  .container { padding: 10px; margin: 5px; }"
+        "  h1 { font-size: 1.3em; }"
+        "  input[type='text'], input[type='password'], select, button { font-size: 16px; }"
+        "}"
         "</style>"
         "</head>"
         "<body>"
         "<div class=\"container\">"
-        "<h1>ESP32CAM WiFi Configuration</h1>"
-        "<p>请输入或选择要连接的WiFi网络：</p>"
+        "<h1>ESP32CAM WiFi 配置</h1>"
+        "<p>请输入或选择要连接的WiFi网络</p>"
         "<button class=\"scan-btn\" onclick=\"scanWifi()\">扫描WiFi网络</button>"
-        "<div id=\"scanInfo\" class=\"scan-info\" style=\"display:none;\"></div>"
-        "<form id=\"configForm\" action=\"/save_wifi\" method=\"post\">"
+        "<div id=\"scanInfo\" class=\"scan-info\"></div>"
+        "<form id=\"configForm\">"
         "<label for=\"ssid\">WiFi名称 (SSID):</label>"
-        "<input type=\"text\" id=\"ssid\" name=\"ssid\" required placeholder=\"请输入WiFi名称或点击扫描按钮\">"
+        "<input type=\"text\" id=\"ssid\" name=\"ssid\" required placeholder=\"请输入WiFi名称或点击扫描\">"
 
-        "<label for=\"wifiSelect\">或从扫描结果中选择：</label>"
+        "<label for=\"wifiSelect\">或从扫描结果中选择:</label>"
         "<select id=\"wifiSelect\" onchange=\"selectWifi()\">"
         "<option value=\"\">-- 请先扫描WiFi网络 --</option>"
         "</select>"
@@ -142,9 +253,10 @@ static esp_err_t index_handler(httpd_req_t* req)
         "<label for=\"password\">WiFi密码:</label>"
         "<input type=\"password\" id=\"password\" name=\"password\" placeholder=\"请输入WiFi密码\">"
 
-        "<button type=\"submit\">保存并连接</button>"
+        "<button type=\"button\" class=\"test-btn\" onclick=\"testConnection()\">测试连接</button>"
+        "<button type=\"button\" class=\"save-btn\" onclick=\"saveAndConnect()\">保存并连接</button>"
         "</form>"
-        "<div id=\"result\" class=\"status\" style=\"display:none;\"></div>"
+        "<div id=\"result\" class=\"status\"></div>"
         "</div>"
 
         "<script>"
@@ -160,30 +272,34 @@ static esp_err_t index_handler(httpd_req_t* req)
         "        select.innerHTML = '<option value=\"\">-- 请选择WiFi网络 --</option>';"
         "        if (data.length > 0) {"
         "            for (let i = 0; i < data.length; i++) {"
-        "                const authText = data[i].authmode == 0 ? 'Open' : 'WPA2';"
+        "                const authText = data[i].authmode == 0 ? '开放' : '安全';"
         "                const option = document.createElement('option');"
         "                option.value = data[i].ssid;"
         "                option.textContent = data[i].ssid + ' (' + authText + ', 信号: ' + data[i].rssi + ')';"
         "                select.appendChild(option);"
         "            }"
-        "            infoDiv.innerHTML = '<strong>扫描完成！</strong> 找到 ' + data.length + ' 个WiFi网络，请从下拉列表中选择。';"
+        "            infoDiv.innerHTML = '<strong>扫描完成!</strong> 找到 ' + data.length + ' 个WiFi网络';"
         "            infoDiv.style.display = 'block';"
+        "            infoDiv.className = 'scan-info';"
         "        } else {"
-        "            infoDiv.innerHTML = '<strong>未扫描到WiFi网络</strong>，请检查设备是否在WiFi覆盖范围内。';"
+        "            infoDiv.innerHTML = '<strong>未扫描到WiFi网络</strong>，请检查设备是否在WiFi覆盖范围内';"
         "            infoDiv.style.display = 'block';"
+        "            infoDiv.className = 'scan-info';"
         "        }"
         "    })"
         "    .catch(error => {"
         "        console.error('Scan error:', error);"
         "        const infoDiv = document.getElementById('scanInfo');"
-        "        infoDiv.innerHTML = '<strong>扫描失败：</strong> ' + error.message;"
+        "        infoDiv.innerHTML = '<strong>扫描失败:</strong> ' + error.message;"
         "        infoDiv.style.display = 'block';"
+        "        infoDiv.className = 'scan-info';"
         "    })"
         "    .finally(() => {"
         "        scanBtn.disabled = false;"
         "        scanBtn.textContent = '扫描WiFi网络';"
         "    });"
         "}"
+
         "function selectWifi() {"
         "    const select = document.getElementById('wifiSelect');"
         "    const ssidInput = document.getElementById('ssid');"
@@ -192,30 +308,87 @@ static esp_err_t index_handler(httpd_req_t* req)
         "        ssidInput.value = selectedValue;"
         "    }"
         "}"
-        "document.getElementById('configForm').addEventListener('submit', function(e) {"
-        "    e.preventDefault();"
-        "    const formData = new FormData(this);"
-        "    const data = {};"
-        "    for (let [key, value] of formData.entries()) {"
-        "        data[key] = value;"
+
+        "function showResult(message, isSuccess) {"
+        "    const resultDiv = document.getElementById('result');"
+        "    resultDiv.style.display = 'block';"
+        "    if (isSuccess) {"
+        "        resultDiv.className = 'status success';"
+        "    } else {"
+        "        resultDiv.className = 'status error';"
         "    }"
-        "    fetch('/save_wifi', {"
+        "    resultDiv.innerHTML = message;"
+        "}"
+
+        "function testConnection() {"
+        "    const ssid = document.getElementById('ssid').value;"
+        "    const password = document.getElementById('password').value;"
+        "    "
+        "    if (!ssid) {"
+        "        showResult('请先输入WiFi名称', false);"
+        "        return;"
+        "    }"
+        "    "
+        "    const testBtn = document.querySelector('.test-btn');"
+        "    testBtn.disabled = true;"
+        "    testBtn.textContent = '测试中...';"
+        "    "
+        "    fetch('/test_wifi', {"
         "        method: 'POST',"
-        "        body: JSON.stringify(data)"
+        "        headers: {'Content-Type': 'application/json'},"
+        "        body: JSON.stringify({ssid: ssid, password: password})"
         "    })"
         "    .then(response => response.json())"
         "    .then(data => {"
-        "        const resultDiv = document.getElementById('result');"
-        "        resultDiv.style.display = 'block';"
         "        if (data.success) {"
-        "            resultDiv.className = 'status success';"
-        "            resultDiv.innerHTML = '配置保存成功！设备将在几秒内重启并连接到新网络。';"
+        "            showResult('WiFi连接测试成功！', true);"
         "        } else {"
-        "            resultDiv.className = 'status error';"
-        "            resultDiv.innerHTML = '保存失败: ' + data.message;"
+        "            showResult('WiFi连接测试失败: ' + data.message, false);"
         "        }"
+        "    })"
+        "    .catch(error => {"
+        "        showResult('连接测试失败: ' + error.message, false);"
+        "    })"
+        "    .finally(() => {"
+        "        testBtn.disabled = false;"
+        "        testBtn.textContent = '测试连接';"
         "    });"
-        "});"
+        "}"
+
+        "function saveAndConnect() {"
+        "    const ssid = document.getElementById('ssid').value;"
+        "    const password = document.getElementById('password').value;"
+        "    "
+        "    if (!ssid) {"
+        "        showResult('请先输入WiFi名称', false);"
+        "        return;"
+        "    }"
+        "    "
+        "    const saveBtn = document.querySelector('.save-btn');"
+        "    saveBtn.disabled = true;"
+        "    saveBtn.textContent = '保存中...';"
+        "    "
+        "    fetch('/save_wifi', {"
+        "        method: 'POST',"
+        "        headers: {'Content-Type': 'application/json'},"
+        "        body: JSON.stringify({ssid: ssid, password: password})"
+        "    })"
+        "    .then(response => response.json())"
+        "    .then(data => {"
+        "        if (data.success) {"
+        "            showResult('配置保存成功！设备将在几秒内重启并连接到新网络。', true);"
+        "        } else {"
+        "            showResult('保存失败: ' + data.message, false);"
+        "            saveBtn.disabled = false;"
+        "            saveBtn.textContent = '保存并连接';"
+        "        }"
+        "    })"
+        "    .catch(error => {"
+        "        showResult('保存失败: ' + error.message, false);"
+        "        saveBtn.disabled = false;"
+        "        saveBtn.textContent = '保存并连接';"
+        "    });"
+        "}"
         "</script>"
         "</body>"
         "</html>";
@@ -460,6 +633,10 @@ static esp_err_t start_webserver(void)
         httpd_register_uri_handler(s_server, &index_uri);
         httpd_register_uri_handler(s_server, &save_wifi_uri);
 
+        // 注册WiFi测试处理器
+        httpd_uri_t test_uri = {.uri = "/test_wifi", .method = HTTP_POST, .handler = test_wifi_handler, .user_ctx = NULL};
+        httpd_register_uri_handler(s_server, &test_uri);
+
         // 注册WiFi扫描处理器
         httpd_uri_t scan_uri = {.uri = "/scan", .method = HTTP_GET, .handler = scan_handler, .user_ctx = NULL};
         httpd_register_uri_handler(s_server, &scan_uri);
@@ -605,6 +782,9 @@ static void start_provisioning_mode(void)
     // 配置模式下快速闪烁
     led_set_state(LED_STATE_BLINK_FAST);
 
+    // 播放WiFi重置语音提示
+    // audio_player_play_wifi_status(2); // 2表示WiFi重置
+
     // 注销WiFi事件处理器，防止自动重连
     wifi_unregister_event_handlers();
     ESP_LOGI(TAG, "Unregistered WiFi event handlers to prevent auto-reconnect");
@@ -662,6 +842,8 @@ static void start_provisioning_mode(void)
     if (s_ap_netif) {
         esp_netif_get_ip_info(s_ap_netif, &s_ap_ip_info);
         ESP_LOGI(TAG, "Provisioning AP IP: " IPSTR, IP2STR(&s_ap_ip_info.ip));
+        // 设置DNS服务器的AP IP地址
+        dns_server_set_ap_ip(s_ap_ip_info.ip.addr);
     }
 
     // 启动DNS服务器（DNS劫持，将所有DNS查询重定向到AP IP）

@@ -30,7 +30,7 @@
 
 static const char* TAG = "APP_MAIN";
 
-#define WIFI_CONFIG_BUTTON_GPIO 12  // 默认使用GPIO12作为配置按钮
+#define WIFI_CONFIG_BUTTON_GPIO 12  // WiFi配置按钮（改为GPIO4，避免可能的GPIO中断冲突）
 
 void app_main(void)
 {
@@ -48,11 +48,22 @@ void app_main(void)
     /* Initialize status LED on GPIO33, active low */
     led_init(33, true);
 
+    /* Initialize camera first (to allocate high-priority interrupts) */
+    esp_err_t camera_err = camera_init();
+    if (camera_err != ESP_OK) {
+        ESP_LOGE(TAG, "Camera initialization failed: %s", esp_err_to_name(camera_err));
+        led_set_state(LED_STATE_BLINK_FAST);
+    }
+
+    /* Initialize audio player (after camera, with lower interrupt priority) */
+    // audio_player_init();  // 临时禁用，测试相机性能
+    ESP_LOGW(TAG, "Audio player initialization skipped for testing");
+
     /* Initialize WiFi manager */
     ESP_ERROR_CHECK(wifi_manager_init());
 
     /* Register WiFi event handlers */
-    ESP_ERROR_CHECK(wifi_register_event_handlers(NULL));
+    wifi_register_event_handlers(NULL);
 
     /* Initialize AP */
     ESP_LOGI(TAG, "ESP_WIFI_MODE_AP");
@@ -75,11 +86,7 @@ void app_main(void)
      * continue to run provisioning portal and services immediately.
      */
     if (strlen(WIFI_STA_SSID) > 0) {
-        EventBits_t bits = xEventGroupWaitBits(wifi_get_event_group(),
-                                                WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
-                                                pdFALSE,
-                                                pdFALSE,
-                                                portMAX_DELAY);
+        EventBits_t bits = xEventGroupWaitBits(wifi_get_event_group(), WIFI_CONNECTED_BIT | WIFI_FAIL_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
 
         /* xEventGroupWaitBits() returns the bits before the call returned,
          * hence we can test which event actually happened. */
@@ -110,18 +117,8 @@ void app_main(void)
         ESP_LOGE(TAG, "NAPT not enabled on the netif: %p", esp_netif_ap);
     }
 
-    // 初始化相机并检查返回值
-    esp_err_t camera_err = camera_init();
-    if (camera_err != ESP_OK) {
-        ESP_LOGE(TAG, "Camera initialization failed: %s", esp_err_to_name(camera_err));
-        led_set_state(LED_STATE_BLINK_FAST);  // 相机初始化失败，快速闪烁LED
-        // 不启动UDP传输，但系统继续运行
-    }
-    else {
-        // 相机初始化成功，启动UDP图像传输
-        if (get_wifi_provisioning_mode() == false)  // 仅在非配置模式下启动
-        {
-            start_udp_camera();
-        }
+    // 启动UDP图像传输（仅相机初始化成功且非配置模式）
+    if (camera_err == ESP_OK && get_wifi_provisioning_mode() == false) {
+        start_udp_camera();
     }
 }
