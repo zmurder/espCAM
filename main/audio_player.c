@@ -11,9 +11,9 @@
 static const char* TAG = "AUDIO_PLAYER";
 
 #define I2S_PORT I2S_NUM_0
-#define SAMPLE_RATE (16000)  // 16kHz采样率
+#define SAMPLE_RATE (8000)  // 8kHz采样率（MAX98357需要16位数据，降低采样率使播放速度正常）
 #define CHANNELS (1)  // 单声道
-#define BITS_PER_SAMPLE (I2S_BITS_PER_SAMPLE_16BIT)
+#define BITS_PER_SAMPLE (I2S_BITS_PER_SAMPLE_16BIT)  // 改回 16 位，MAX98357 需要
 
 // ============================================================================
 // 音频数据（存储在 Flash 中，运行时加载到 PSRAM）
@@ -41,7 +41,7 @@ static bool i2s_initialized = false;
 static i2s_config_t i2s_config = {
     .mode = I2S_MODE_MASTER | I2S_MODE_TX,
     .sample_rate = SAMPLE_RATE,
-    .bits_per_sample = BITS_PER_SAMPLE,
+    .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,  // 改回 16 位，MAX98357 需要
     .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
     .communication_format = I2S_COMM_FORMAT_STAND_I2S,
     .intr_alloc_flags = 0,  // 禁用中断，使用轮询模式（避免与相机中断冲突）
@@ -55,7 +55,7 @@ static i2s_config_t i2s_config = {
 // I2S引脚配置 - 使用 GPIO 14, 12, 15 避免与相机冲突
 static i2s_pin_config_t i2s_pin_config = {
     .bck_io_num = 14,      // I2S 位时钟 (BCLK)
-    .ws_io_num = 12,       // I2S 字选择/左右声道时钟 (LRCK/WS)
+    .ws_io_num = 13,       // I2S 字选择/左右声道时钟 (LRCK/WS) - 改为 GPIO 13
     .data_out_num = 15,    // I2S 数据输出 (DOUT)
     .data_in_num = -1      // 不使用数据输入
 };
@@ -130,7 +130,7 @@ esp_err_t audio_player_play_data(uint8_t* audio_data, size_t data_size)
 }
 
 /**
- * @brief 播放8位PCM音频数据（转换为16位PCM）
+ * @brief 播放8位PCM音频数据（扩展为16位）
  * @param audio_data 8位PCM音频数据
  * @param data_size 音频数据大小
  * @return esp_err_t
@@ -141,7 +141,7 @@ static esp_err_t play_8bit_pcm(const uint8_t* audio_data, size_t data_size)
         return ESP_ERR_INVALID_ARG;
     }
 
-    // 分配缓冲区用于16位转换（使用较小的块大小以节省内存）
+    // 分配缓冲区用于8位到16位扩展
     uint16_t* buffer = (uint16_t*)malloc(2048 * sizeof(uint16_t));
     if (buffer == NULL) {
         ESP_LOGE(TAG, "Failed to allocate audio buffer");
@@ -154,14 +154,14 @@ static esp_err_t play_8bit_pcm(const uint8_t* audio_data, size_t data_size)
     while (offset < data_size) {
         size_t current_chunk = (data_size - offset > chunk_size) ? chunk_size : (data_size - offset);
 
-        // 将8位PCM转换为16位PCM
+        // 将8位PCM扩展为16位PCM（每个字节重复两次）
         for (size_t i = 0; i < current_chunk; i++) {
             // 8位无符号转16位有符号：(value - 128) * 256
             int16_t sample = ((int16_t)audio_data[offset + i] - 128) * 256;
             buffer[i] = (uint16_t)sample;
         }
 
-        // 播放转换后的数据
+        // 播放扩展后的数据
         size_t bytes_written;
         esp_err_t ret = i2s_write(I2S_PORT, buffer, current_chunk * 2, &bytes_written, portMAX_DELAY);
         if (ret != ESP_OK) {

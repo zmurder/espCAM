@@ -16,6 +16,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
+#include "esp_intr_types.h"
 
 #if IP_NAPT
 #include "lwip/lwip_napt.h"
@@ -31,6 +32,17 @@
 static const char* TAG = "APP_MAIN";
 
 #define WIFI_CONFIG_BUTTON_GPIO 12  // WiFi配置按钮（改为GPIO4，避免可能的GPIO中断冲突）
+
+static void audio_player_init_task(void* arg)
+{
+    esp_err_t ret = audio_player_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Audio player initialization failed: %s", esp_err_to_name(ret));
+    } else {
+        ESP_LOGI(TAG, "Audio player initialized successfully on CPU1");
+    }
+    vTaskDelete(NULL);
+}
 
 void app_main(void)
 {
@@ -55,9 +67,9 @@ void app_main(void)
         led_set_state(LED_STATE_BLINK_FAST);
     }
 
-    /* Initialize audio player (after camera, with lower interrupt priority) */
-    // audio_player_init();  // 临时禁用，测试相机性能
-    ESP_LOGW(TAG, "Audio player initialization skipped for testing");
+    /* Initialize audio player on CPU1 to use CPU1's interrupt resources */
+    xTaskCreatePinnedToCore(audio_player_init_task, "audio_init", 4096, NULL, 5, NULL, 1);
+    ESP_LOGI(TAG, "Audio player initialization scheduled on CPU1");
 
     /* Initialize WiFi manager */
     ESP_ERROR_CHECK(wifi_manager_init());
@@ -116,6 +128,12 @@ void app_main(void)
     if (esp_netif_napt_enable(esp_netif_ap) != ESP_OK) {
         ESP_LOGE(TAG, "NAPT not enabled on the netif: %p", esp_netif_ap);
     }
+
+    // 等待音频初始化完成（给任务一些时间）
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    // 打印最终中断分配情况
+    esp_intr_dump(NULL);  // 调试：打印最终中断分配情况
 
     // 启动UDP图像传输（仅相机初始化成功且非配置模式）
     if (camera_err == ESP_OK && get_wifi_provisioning_mode() == false) {

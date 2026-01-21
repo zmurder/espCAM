@@ -783,7 +783,7 @@ static void start_provisioning_mode(void)
     led_set_state(LED_STATE_BLINK_FAST);
 
     // 播放WiFi重置语音提示
-    // audio_player_play_wifi_status(2); // 2表示WiFi重置
+    audio_player_play_wifi_status(2); // 2表示WiFi重置
 
     // 注销WiFi事件处理器，防止自动重连
     wifi_unregister_event_handlers();
