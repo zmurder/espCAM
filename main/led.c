@@ -9,7 +9,7 @@ static bool s_active_low = true;
 static led_state_t s_state = LED_STATE_OFF;
 static TaskHandle_t s_task = NULL;
 
-static const ledc_mode_t LEDC_MODE = LEDC_HIGH_SPEED_MODE;
+static const ledc_mode_t LEDC_MODE = LEDC_LOW_SPEED_MODE;
 // Use TIMER_1/CHANNEL_1 to avoid conflict with camera XCLK (which uses TIMER_0/CHANNEL_0)
 static const ledc_timer_t LEDC_TIMER = LEDC_TIMER_1;
 static const ledc_channel_t LEDC_CHANNEL = LEDC_CHANNEL_1;

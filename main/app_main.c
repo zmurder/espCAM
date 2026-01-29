@@ -31,14 +31,16 @@
 
 static const char* TAG = "APP_MAIN";
 
-#define WIFI_CONFIG_BUTTON_GPIO 12  // WiFi配置按钮（改为GPIO4，避免可能的GPIO中断冲突）
+#define WIFI_CONFIG_BUTTON_GPIO 14  // WiFi配置按钮（改为GPIO4，避免可能的GPIO中断冲突）
 
 static void audio_player_init_task(void* arg)
 {
+    ESP_LOGI(TAG, "Audio player init task running on CPU core %d", xPortGetCoreID());
     esp_err_t ret = audio_player_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Audio player initialization failed: %s", esp_err_to_name(ret));
-    } else {
+    }
+    else {
         ESP_LOGI(TAG, "Audio player initialized successfully on CPU1");
     }
     vTaskDelete(NULL);
@@ -58,7 +60,7 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     /* Initialize status LED on GPIO33, active low */
-    led_init(33, true);
+    led_init(2, true);
 
     /* Initialize camera first (to allocate high-priority interrupts) */
     esp_err_t camera_err = camera_init();
@@ -66,10 +68,13 @@ void app_main(void)
         ESP_LOGE(TAG, "Camera initialization failed: %s", esp_err_to_name(camera_err));
         led_set_state(LED_STATE_BLINK_FAST);
     }
+    vTaskDelay(pdMS_TO_TICKS(100));  // 等待100ms
 
     /* Initialize audio player on CPU1 to use CPU1's interrupt resources */
-    xTaskCreatePinnedToCore(audio_player_init_task, "audio_init", 4096, NULL, 5, NULL, 1);
-    ESP_LOGI(TAG, "Audio player initialization scheduled on CPU1");
+    // 暂时禁用 I2S 音频初始化，用于调试看门狗重启问题
+    // xTaskCreatePinnedToCore(audio_player_init_task, "audio_init", 4096, NULL, 5, NULL, 1);
+    // ESP_LOGI(TAG, "Audio player initialization scheduled on CPU1");
+    ESP_LOGI(TAG, "Audio player initialization DISABLED for debugging");
 
     /* Initialize WiFi manager */
     ESP_ERROR_CHECK(wifi_manager_init());

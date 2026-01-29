@@ -109,29 +109,38 @@ static esp_err_t wifi_connect_to_ap_test(const char* ssid, const char* password)
     if (password && strlen(password) > 0) {
         strncpy((char*)wifi_config.sta.password, password, sizeof(wifi_config.sta.password) - 1);
     }
-    
-    // 设置临时配置
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_connect());
 
-    EventGroupHandle_t event_group = wifi_get_event_group();
-    if (event_group == NULL) {
+    // 先断开当前连接（如果有）
+    esp_wifi_disconnect();
+    vTaskDelay(pdMS_TO_TICKS(500));  // 等待断开完成
+
+    // 设置临时配置
+    esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_wifi_set_config failed: %s", esp_err_to_name(err));
         return ESP_FAIL;
     }
 
-    // 等待连接结果，最多等待8秒
-    EventBits_t bits = xEventGroupWaitBits(event_group,
-                                          WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
-                                          pdFALSE,
-                                          pdFALSE,
-                                          pdMS_TO_TICKS(8000)
-    );
+    err = esp_wifi_connect();
+    if (err != ESP_OK && err != ESP_ERR_WIFI_STATE) {
+        ESP_LOGE(TAG, "esp_wifi_connect failed: %s", esp_err_to_name(err));
+        return ESP_FAIL;
+    }
 
-    bool connected = (bits & WIFI_CONNECTED_BIT) != 0;
-    
-    // 断开测试连接，恢复原有配置
-    esp_wifi_disconnect();
-    
+    // 等待连接结果，最多等待15秒
+    // 使用 esp_wifi_sta_get_ap_info() 检查连接状态
+    wifi_ap_record_t ap_info;
+    bool connected = false;
+    for (int i = 0; i < 15; i++) {
+        vTaskDelay(pdMS_TO_TICKS(1000));  // 每秒检查一次
+        esp_err_t status = esp_wifi_sta_get_ap_info(&ap_info);
+        if (status == ESP_OK) {
+            connected = true;
+            ESP_LOGI(TAG, "Connected to AP: %s, RSSI: %d", ap_info.ssid, ap_info.rssi);
+            break;
+        }
+    }
+
     return connected ? ESP_OK : ESP_FAIL;
 }
 
@@ -239,7 +248,7 @@ static esp_err_t index_handler(httpd_req_t* req)
         "<div class=\"container\">"
         "<h1>ESP32CAM WiFi 配置</h1>"
         "<p>请输入或选择要连接的WiFi网络</p>"
-        "<button class=\"scan-btn\" onclick=\"scanWifi()\">扫描WiFi网络</button>"
+        "<button class=\"scan-btn\" onclick=\"scanWifi(event)\">扫描WiFi网络</button>"
         "<div id=\"scanInfo\" class=\"scan-info\"></div>"
         "<form id=\"configForm\">"
         "<label for=\"ssid\">WiFi名称 (SSID):</label>"
@@ -260,11 +269,11 @@ static esp_err_t index_handler(httpd_req_t* req)
         "</div>"
 
         "<script>"
-        "function scanWifi() {"
+        "function scanWifi(event) {"
+        "    event.preventDefault();"
         "    const scanBtn = document.querySelector('.scan-btn');"
         "    scanBtn.disabled = true;"
-        "    scanBtn.textContent = '扫描中...';"
-        "    fetch('/scan')"
+        "    scanBtn.textContent = '扫描中...';"        "    fetch('/scan')"
         "    .then(response => response.json())"
         "    .then(data => {"
         "        const select = document.getElementById('wifiSelect');"
@@ -1060,8 +1069,44 @@ static esp_err_t wifi_connect_to_ap(const char* ssid, const char* password)
     if (password && strlen(password) > 0) {
         strncpy((char*)wifi_config.sta.password, password, sizeof(wifi_config.sta.password) - 1);
     }
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_connect());
+
+    // 检查是否已经在连接中
+    wifi_ap_record_t ap_info;
+    esp_err_t status = esp_wifi_sta_get_ap_info(&ap_info);
+    if (status == ESP_OK) {
+        ESP_LOGI(TAG, "Already connected to WiFi, skipping connect");
+        return ESP_OK;
+    }
+
+    // 先断开连接，确保 WiFi 状态干净
+    ESP_LOGI(TAG, "Disconnecting WiFi to ensure clean state");
+    esp_wifi_disconnect();
+    vTaskDelay(pdMS_TO_TICKS(500));  // 等待断开完成
+
+    // 扫描 AP，确保目标 AP 存在
+    ESP_LOGI(TAG, "Scanning for AP: %s", ssid);
+    esp_err_t scan_err = esp_wifi_scan_start(NULL, true);
+    if (scan_err != ESP_OK) {
+        ESP_LOGW(TAG, "WiFi scan start failed: %s", esp_err_to_name(scan_err));
+        // 扫描失败也继续尝试连接
+    } else {
+        // 等待扫描完成，最多5秒
+        vTaskDelay(pdMS_TO_TICKS(5000));
+    }
+
+    // 设置 WiFi 配置
+    esp_err_t config_err = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
+    if (config_err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_wifi_set_config failed: %s", esp_err_to_name(config_err));
+        return config_err;
+    }
+
+    // 尝试连接
+    esp_err_t conn_err = esp_wifi_connect();
+    if (conn_err != ESP_OK && conn_err != ESP_ERR_WIFI_STATE) {
+        ESP_LOGW(TAG, "esp_wifi_connect failed: %s", esp_err_to_name(conn_err));
+        return conn_err;
+    }
 
     EventGroupHandle_t event_group = wifi_get_event_group();
     if (event_group == NULL) {
@@ -1073,7 +1118,7 @@ static esp_err_t wifi_connect_to_ap(const char* ssid, const char* password)
                                            WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
                                            pdFALSE,
                                            pdFALSE,
-                                           pdMS_TO_TICKS(10000)  // 等待10秒
+                                           pdMS_TO_TICKS(15000)  // 等待15秒
     );
 
     bool connected = (bits & WIFI_CONNECTED_BIT) != 0;
