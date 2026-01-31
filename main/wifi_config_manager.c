@@ -803,6 +803,10 @@ static void start_provisioning_mode(void)
     esp_wifi_disconnect();
     ESP_LOGI(TAG, "Disconnected from STA network");
 
+    // 清空NVS中的WiFi凭据
+    wifi_config_clear_all_credentials();
+    ESP_LOGI(TAG, "Cleared all WiFi credentials from NVS");
+
     // 配置DHCP服务器，将DNS服务器地址设置为AP的IP地址
     if (s_ap_netif) {
         esp_netif_dns_info_t dns_info;
