@@ -161,10 +161,7 @@ static void handle_audio_packet(udp_audio_chunk_t* audio_packet, size_t packet_s
     uint32_t total_packets = ntohl(audio_packet->total_packets);
     uint32_t audio_size = ntohl(audio_packet->audio_size);
 
-    ESP_LOGI(TAG, "收到音频包，ID: %lu/%lu, 音频大小: %lu bytes",
-             (unsigned long)packet_id,
-             (unsigned long)total_packets,
-             (unsigned long)audio_size);
+    ESP_LOGI(TAG, "收到音频包，ID: %lu/%lu, 音频大小: %lu bytes", (unsigned long)packet_id, (unsigned long)total_packets, (unsigned long)audio_size);
 
     // 播放音频数据
     size_t actual_data_size = packet_size - sizeof(uint32_t) * 3;
@@ -196,8 +193,7 @@ static void audio_receive_task(void* pvParameters)
     ESP_LOGI(TAG, "音频接收任务启动，监听端口: %d", UDP_AUDIO_PORT);
 
     while (s_udp_task_running) {
-        int len = recvfrom(s_audio_socket, recv_buffer, MAX_UDP_PACKET_SIZE, 0,
-                           (struct sockaddr*)&source_addr, &addr_len);
+        int len = recvfrom(s_audio_socket, recv_buffer, MAX_UDP_PACKET_SIZE, 0, (struct sockaddr*)&source_addr, &addr_len);
 
         if (len < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -212,7 +208,8 @@ static void audio_receive_task(void* pvParameters)
         if (len >= sizeof(udp_audio_chunk_t)) {
             udp_audio_chunk_t* audio_pkt = (udp_audio_chunk_t*)recv_buffer;
             handle_audio_packet(audio_pkt, len);
-        } else {
+        }
+        else {
             // 收到的数据包太小，可能是原始音频数据
             ESP_LOGD(TAG, "收到原始音频数据: %d bytes", len);
             esp_err_t ret = audio_player_play_stream(recv_buffer, len);
@@ -383,9 +380,10 @@ void udp_camera_task(void* pvParameters)
     // 初始化音频接收socket
     if (init_audio_socket() != ESP_OK) {
         ESP_LOGE(TAG, "音频socket初始化失败");
-    } else {
+    }
+    else {
         // 启动音频接收任务
-        xTaskCreate(audio_receive_task, "audio_receive_task", 4096, NULL, 5, NULL);
+        xTaskCreate(audio_receive_task, "audio_receive_task", 4096, NULL, 3, NULL);
     }
 
     while (s_udp_task_running) {

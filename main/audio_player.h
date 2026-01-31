@@ -28,7 +28,7 @@ esp_err_t audio_player_play_wifi_status(int status);
  * @brief 停止音频播放并清除缓冲区
  * @return esp_err_t
  */
-esp_err_t audio_player_stop(void);
+esp_err_t audio_player_stop();
 
 /**
  * @brief 播放连续的音频流（用于接收PC发送的语音数据）

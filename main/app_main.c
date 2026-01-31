@@ -59,8 +59,8 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    /* Initialize status LED on GPIO33, active low */
-    led_init(2, true);
+    /* Initialize status LED on GPIO2, active High */
+    led_init(2, false);
 
     /* Initialize camera first (to allocate high-priority interrupts) */
     esp_err_t camera_err = camera_init();
@@ -72,7 +72,7 @@ void app_main(void)
 
     /* Initialize audio player on CPU1 to use CPU1's interrupt resources */
     // 暂时禁用 I2S 音频初始化，用于调试看门狗重启问题
-    // xTaskCreatePinnedToCore(audio_player_init_task, "audio_init", 4096, NULL, 5, NULL, 1);
+    xTaskCreatePinnedToCore(audio_player_init_task, "audio_init", 4096, NULL, 5, NULL, 1);
     // ESP_LOGI(TAG, "Audio player initialization scheduled on CPU1");
     ESP_LOGI(TAG, "Audio player initialization DISABLED for debugging");
 

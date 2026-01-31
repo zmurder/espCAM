@@ -3,7 +3,7 @@
 #include "driver/ledc.h"
 #include "esp_log.h"
 
-static const char *TAG = "led";
+static const char* TAG = "led";
 static int s_led_gpio = -1;
 static bool s_active_low = true;
 static led_state_t s_state = LED_STATE_OFF;
@@ -13,8 +13,8 @@ static const ledc_mode_t LEDC_MODE = LEDC_LOW_SPEED_MODE;
 // Use TIMER_1/CHANNEL_1 to avoid conflict with camera XCLK (which uses TIMER_0/CHANNEL_0)
 static const ledc_timer_t LEDC_TIMER = LEDC_TIMER_1;
 static const ledc_channel_t LEDC_CHANNEL = LEDC_CHANNEL_1;
-static const ledc_timer_bit_t LEDC_DUTY_RES = LEDC_TIMER_10_BIT; // 0-1023
-static const int LEDC_FREQUENCY = 5000; // 5 kHz
+static const ledc_timer_bit_t LEDC_DUTY_RES = LEDC_TIMER_10_BIT;  // 0-1023
+static const int LEDC_FREQUENCY = 5000;                           // 5 kHz
 static int s_duty_max = 0;
 
 static void led_set_duty(int duty)
@@ -28,7 +28,7 @@ static void led_set_duty(int duty)
     ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
 }
 
-static void led_task(void *arg)
+static void led_task(void* arg)
 {
     // Ensure fade functions available
     while (1) {
@@ -36,17 +36,20 @@ static void led_task(void *arg)
         if (cur == LED_STATE_ON) {
             led_set_duty(s_duty_max);
             vTaskDelay(pdMS_TO_TICKS(200));
-        } else if (cur == LED_STATE_OFF) {
+        }
+        else if (cur == LED_STATE_OFF) {
             led_set_duty(0);
             vTaskDelay(pdMS_TO_TICKS(200));
-        } else if (cur == LED_STATE_BLINK_FAST) {
+        }
+        else if (cur == LED_STATE_BLINK_FAST) {
             // 100ms on, 100ms off
             led_set_duty(s_duty_max);
             vTaskDelay(pdMS_TO_TICKS(100));
             if (s_state != LED_STATE_BLINK_FAST) continue;
             led_set_duty(0);
             vTaskDelay(pdMS_TO_TICKS(100));
-        } else if (cur == LED_STATE_BREATH) {
+        }
+        else if (cur == LED_STATE_BREATH) {
             // Use LEDC fade for smooth breathing: up 1000ms, down 1000ms
             // 使用非阻塞模式，避免任务阻塞
             ledc_set_fade_with_time(LEDC_MODE, LEDC_CHANNEL, s_duty_max, 1000);
@@ -58,7 +61,8 @@ static void led_task(void *arg)
             ledc_fade_start(LEDC_MODE, LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
             // 等待渐变完成
             vTaskDelay(pdMS_TO_TICKS(1000));
-        } else {
+        }
+        else {
             vTaskDelay(pdMS_TO_TICKS(200));
         }
     }
@@ -108,7 +112,7 @@ esp_err_t led_init(int gpio_num, bool active_low)
     // default off
     led_set_duty(0);
 
-    xTaskCreate(led_task, "led_task", 2048, NULL, 5, &s_task);
+    xTaskCreate(led_task, "led_task", 2048, NULL, 0, &s_task);
     return ESP_OK;
 }
 

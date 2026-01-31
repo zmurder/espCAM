@@ -273,7 +273,8 @@ static esp_err_t index_handler(httpd_req_t* req)
         "    event.preventDefault();"
         "    const scanBtn = document.querySelector('.scan-btn');"
         "    scanBtn.disabled = true;"
-        "    scanBtn.textContent = '扫描中...';"        "    fetch('/scan')"
+        "    scanBtn.textContent = '扫描中...';"
+        "    fetch('/scan')"
         "    .then(response => response.json())"
         "    .then(data => {"
         "        const select = document.getElementById('wifiSelect');"
@@ -478,7 +479,7 @@ static esp_err_t save_wifi_handler(httpd_req_t* req)
     if (conn_res == ESP_OK) {
         httpd_resp_sendstr(req, "{\"success\": true, \"message\": \"Connected to WiFi, device will restart\"}");
         // 先创建重启任务
-        xTaskCreate(restart_task, "restart_task", 4096, NULL, 5, NULL);
+        xTaskCreate(restart_task, "restart_task", 4096, NULL, 4, NULL);
         // 然后停止配置模式
         stop_provisioning_mode();
     }
@@ -715,7 +716,7 @@ esp_err_t wifi_config_manager_init(int button_gpio, EventGroupHandle_t event_gro
     }
 
     // 创建配置任务
-    xTaskCreate(wifi_config_check_button_task, "wifi_config_btn", 4096, NULL, 5, &s_prov_task_handle);
+    xTaskCreate(wifi_config_check_button_task, "wifi_config_btn", 4096, NULL, 4, &s_prov_task_handle);
 
     // 尝试加载已保存的WiFi配置
     wifi_credentials_t creds;
@@ -792,7 +793,7 @@ static void start_provisioning_mode(void)
     led_set_state(LED_STATE_BLINK_FAST);
 
     // 播放WiFi重置语音提示
-    audio_player_play_wifi_status(2); // 2表示WiFi重置
+    audio_player_play_wifi_status(2);  // 2表示WiFi重置
 
     // 注销WiFi事件处理器，防止自动重连
     wifi_unregister_event_handlers();
@@ -1089,7 +1090,8 @@ static esp_err_t wifi_connect_to_ap(const char* ssid, const char* password)
     if (scan_err != ESP_OK) {
         ESP_LOGW(TAG, "WiFi scan start failed: %s", esp_err_to_name(scan_err));
         // 扫描失败也继续尝试连接
-    } else {
+    }
+    else {
         // 等待扫描完成，最多5秒
         vTaskDelay(pdMS_TO_TICKS(5000));
     }

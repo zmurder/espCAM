@@ -44,7 +44,7 @@ esp_err_t audio_player_init(void)
     esp_err_t ret;
 
     // Step 1: 创建 I2S 通道
-    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
+    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM, I2S_ROLE_MASTER);
     ret = i2s_new_channel(&chan_cfg, &tx_chan, NULL);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to create I2S channel: %s", esp_err_to_name(ret));
@@ -157,9 +157,30 @@ esp_err_t audio_player_play(uint8_t* audio_data, size_t data_size)
     return ESP_OK;
 }
 
-esp_err_t audio_player_stop(void)
+esp_err_t audio_player_stop()
 {
-    // 新驱动中不需要清零 DMA 缓冲区，直接返回成功
+    if (!i2s_initialized) {
+        ESP_LOGW(TAG, "Audio player not initialized");
+        return ESP_OK;
+    }
+
+    // // 计算音频播放时间（毫秒）
+    // int32_t audio_duration_ms = (data_size * 1000) / SAMPLE_RATE;
+
+    // // 等待音频播放完成
+    // if (audio_duration_ms > 0) {
+    //     vTaskDelay(pdMS_TO_TICKS(audio_duration_ms));
+    // }
+
+    // 发送静音数据覆盖 DMA 缓冲区
+    size_t silence_size = 4096;  // 4KB 静音数据
+    uint16_t* silence_buffer = malloc(silence_size);
+    if (silence_buffer != NULL) {
+        memset(silence_buffer, 0, silence_size);  // 全0表示静音
+        size_t bytes_written;
+        i2s_channel_write(tx_chan, silence_buffer, silence_size, &bytes_written, portMAX_DELAY);
+        free(silence_buffer);
+    }
     return ESP_OK;
 }
 
@@ -207,6 +228,9 @@ esp_err_t audio_player_play_stream(uint8_t* audio_data, size_t data_size)
         offset += current_chunk;
         free(buffer);
     }
+
+    // 播放完成后停止并发送静音
+    audio_player_stop(data_size);
 
     return ESP_OK;
 }
