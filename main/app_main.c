@@ -28,10 +28,12 @@
 #include "wifi_config_manager.h"
 #include "led.h"
 #include "udp_camera_client.h"
+#include "posture_model.h"
+#include "audio_player.h"
 
 static const char* TAG = "APP_MAIN";
 
-#define WIFI_CONFIG_BUTTON_GPIO 14  // WiFi配置按钮（改为GPIO4，避免可能的GPIO中断冲突）
+#define WIFI_CONFIG_BUTTON_GPIO 14
 
 static void audio_player_init_task(void* arg)
 {
@@ -44,6 +46,74 @@ static void audio_player_init_task(void* arg)
         ESP_LOGI(TAG, "Audio player initialized successfully on CPU1");
     }
     vTaskDelete(NULL);
+}
+
+/**
+ * @brief 坐姿检测推理任务
+ */
+static void posture_inference_task(void* arg)
+{
+    ESP_LOGI(TAG, "Posture inference task started on core %d", xPortGetCoreID());
+
+    // 等待系统稳定
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
+    // 初始化姿态检测模型
+    ESP_LOGI(TAG, "Posture model init...");
+    esp_err_t ret = posture_model_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Posture model init failed: %s", esp_err_to_name(ret));
+        vTaskDelete(NULL);
+        return;
+    }
+    ESP_LOGI(TAG, "Posture model init OK");
+
+    ESP_LOGI(TAG, "Starting posture inference loop...");
+
+#if POSTURE_TEST_MODE
+    // 测试模式：test() 已在 posture_model_init() 中运行，这里直接结束任务
+    ESP_LOGI(TAG, "POSTURE_TEST_MODE: Model test completed, exiting task");
+    posture_model_deinit();
+    vTaskDelete(NULL);
+#else
+    // 实际推理模式：无限循环进行姿态检测
+    while (1) {
+        camera_fb_t* fb = esp_camera_fb_get();
+        if (fb == NULL) {
+            ESP_LOGW(TAG, "Failed to get camera frame");
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+
+        posture_output_t output;
+        ret = posture_model_run_inference(fb, &output);
+        esp_camera_fb_return(fb);
+
+        if (ret == ESP_OK) {
+            if (output.result == POSTURE_OK) {
+                ESP_LOGI(TAG, "Posture: OK (ratio=%.3f)", output.ratio);
+            }
+            else if (output.result == POSTURE_BAD_NECK) {
+                ESP_LOGE(TAG, "Posture: BAD_NECK (ratio=%.3f)", output.ratio);
+                audio_player_play_posture_alert(POSTURE_BAD_NECK);
+            }
+            else if (output.result == POSTURE_BAD_SHOULDER) {
+                ESP_LOGE(TAG, "Posture: BAD - shoulder issue");
+                audio_player_play_posture_alert(POSTURE_BAD_SHOULDER);
+            }
+            else {
+                ESP_LOGW(TAG, "Posture: Keypoints not detected");
+            }
+
+            ESP_LOGI(TAG, "Inference latency: %lu us", (unsigned long)posture_model_get_last_latency_us());
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+
+    posture_model_deinit();
+    vTaskDelete(NULL);
+#endif
 }
 
 void app_main(void)
@@ -68,12 +138,10 @@ void app_main(void)
         ESP_LOGE(TAG, "Camera initialization failed: %s", esp_err_to_name(camera_err));
         led_set_state(LED_STATE_BLINK_FAST);
     }
-    vTaskDelay(pdMS_TO_TICKS(100));  // 等待100ms
+    vTaskDelay(pdMS_TO_TICKS(100));
 
     /* Initialize audio player on CPU1 to use CPU1's interrupt resources */
-    // 暂时禁用 I2S 音频初始化，用于调试看门狗重启问题
     xTaskCreatePinnedToCore(audio_player_init_task, "audio_init", 4096, NULL, 5, NULL, 1);
-    // ESP_LOGI(TAG, "Audio player initialization scheduled on CPU1");
     ESP_LOGI(TAG, "Audio player initialization DISABLED for debugging");
 
     /* Initialize WiFi manager */
@@ -93,20 +161,15 @@ void app_main(void)
     /* Start WiFi */
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    // 初始化WiFi配置管理器，使用宏 WIFI_CONFIG_BUTTON_GPIO 指定的引脚作为配置按钮，传入事件组和AP netif
+    // 初始化WiFi配置管理器
     ESP_ERROR_CHECK(wifi_config_manager_init(WIFI_CONFIG_BUTTON_GPIO, wifi_get_event_group(), esp_netif_ap));
 
     /*
      * If a compile-time STA SSID is configured, wait for connection result
-     * (WIFI_CONNECTED_BIT or WIFI_FAIL_BIT). If no compile-time SSID is set
-     * (we rely solely on NVS/portal), skip the blocking wait so device can
-     * continue to run provisioning portal and services immediately.
      */
     if (strlen(WIFI_STA_SSID) > 0) {
         EventBits_t bits = xEventGroupWaitBits(wifi_get_event_group(), WIFI_CONNECTED_BIT | WIFI_FAIL_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
 
-        /* xEventGroupWaitBits() returns the bits before the call returned,
-         * hence we can test which event actually happened. */
         if (bits & WIFI_CONNECTED_BIT) {
             ESP_LOGI(TAG, "connected to ap SSID:%s password:%s", WIFI_STA_SSID, WIFI_STA_PASSWD);
             wifi_set_dns_addr(esp_netif_ap, esp_netif_sta);
@@ -122,7 +185,6 @@ void app_main(void)
     }
     else {
         ESP_LOGI(TAG, "No compile-time STA SSID configured; skipping auto-connect wait.");
-        // 没有配置WiFi，LED快速闪烁提示用户需要配置
         led_set_state(LED_STATE_BLINK_FAST);
     }
 
@@ -134,14 +196,12 @@ void app_main(void)
         ESP_LOGE(TAG, "NAPT not enabled on the netif: %p", esp_netif_ap);
     }
 
-    // 等待音频初始化完成（给任务一些时间）
+    // 等待音频初始化完成
     vTaskDelay(pdMS_TO_TICKS(100));
 
     // 打印最终中断分配情况
-    esp_intr_dump(NULL);  // 调试：打印最终中断分配情况
+    esp_intr_dump(NULL);
 
-    // 启动UDP图像传输（仅相机初始化成功且非配置模式）
-    if (camera_err == ESP_OK && get_wifi_provisioning_mode() == false) {
-        start_udp_camera();
-    }
+    // 启动坐姿检测推理任务（不使用 UDP 图像传输）
+    xTaskCreatePinnedToCore(posture_inference_task, "posture_inf", 32768, NULL, 5, NULL, 0);
 }

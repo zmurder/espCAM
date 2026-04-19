@@ -1,0 +1,4 @@
+# Name,   Type, SubType, Offset,  Size, Flags
+factory,  app,  factory,  0x10000,  4M,
+nvs,      data, nvs,      ,        0x6000,
+phy,      data, phy,      ,        0x4000,
