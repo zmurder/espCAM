@@ -1,0 +1,3508 @@
+{
+    "configs": {
+        "/conv1/conv1.0/Conv": {
+            "input.1": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1581038040,
+                "dominator": 1581038040
+            },
+            "onnx::Conv_267": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 878039355,
+                "dominator": 878039355
+            },
+            "onnx::Conv_268": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 2724845330,
+                "dominator": 2724845330
+            },
+            "/conv1/conv1.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3141525901,
+                "dominator": 2745863777
+            }
+        },
+        "/Clip": {
+            "/conv1/conv1.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1794600476,
+                "dominator": 2745863777
+            },
+            "PPQ_Variable_14": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3268658287,
+                "dominator": 3268658287
+            },
+            "PPQ_Variable_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1160105334,
+                "dominator": 1160105334
+            },
+            "/Clip_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2745863777,
+                "dominator": 2745863777
+            }
+        },
+        "/stage1/stage1.0/depthwise/depthwise.0/Conv": {
+            "/Clip_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 236697504,
+                "dominator": 2745863777
+            },
+            "onnx::Conv_270": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1501165539,
+                "dominator": 1501165539
+            },
+            "onnx::Conv_271": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 1094320922,
+                "dominator": 1094320922
+            },
+            "/stage1/stage1.0/depthwise/depthwise.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2929294709,
+                "dominator": 936731337
+            }
+        },
+        "/stage1/stage1.0/Clip": {
+            "/stage1/stage1.0/depthwise/depthwise.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 839662180,
+                "dominator": 936731337
+            },
+            "PPQ_Variable_15": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1487962007,
+                "dominator": 1487962007
+            },
+            "PPQ_Variable_1": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1455307774,
+                "dominator": 1455307774
+            },
+            "/stage1/stage1.0/Clip_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 936731337,
+                "dominator": 936731337
+            }
+        },
+        "/stage1/stage1.0/pointwise/pointwise.0/Conv": {
+            "/stage1/stage1.0/Clip_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 792648296,
+                "dominator": 936731337
+            },
+            "onnx::Conv_273": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3013980043,
+                "dominator": 3013980043
+            },
+            "onnx::Conv_274": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 4135025698,
+                "dominator": 4135025698
+            },
+            "/stage1/stage1.0/pointwise/pointwise.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1310667357,
+                "dominator": 4106494001
+            }
+        },
+        "/stage1/stage1.0/Clip_1": {
+            "/stage1/stage1.0/pointwise/pointwise.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 4131437484,
+                "dominator": 4106494001
+            },
+            "PPQ_Variable_16": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2185370559,
+                "dominator": 2185370559
+            },
+            "PPQ_Variable_2": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1543243654,
+                "dominator": 1543243654
+            },
+            "/stage1/stage1.0/Clip_1_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 4106494001,
+                "dominator": 4106494001
+            }
+        },
+        "/stage1/stage1.1/depthwise/depthwise.0/Conv": {
+            "/stage1/stage1.0/Clip_1_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2600092208,
+                "dominator": 4106494001
+            },
+            "onnx::Conv_276": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1868339251,
+                "dominator": 1868339251
+            },
+            "onnx::Conv_277": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 320299562,
+                "dominator": 320299562
+            },
+            "/stage1/stage1.1/depthwise/depthwise.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 594649157,
+                "dominator": 4165559961
+            }
+        },
+        "/stage1/stage1.1/Clip": {
+            "/stage1/stage1.1/depthwise/depthwise.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2771587572,
+                "dominator": 4165559961
+            },
+            "PPQ_Variable_17": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3610130663,
+                "dominator": 3610130663
+            },
+            "PPQ_Variable_3": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1819168782,
+                "dominator": 1819168782
+            },
+            "/stage1/stage1.1/Clip_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 4165559961,
+                "dominator": 4165559961
+            }
+        },
+        "/stage1/stage1.1/pointwise/pointwise.0/Conv": {
+            "/stage1/stage1.1/Clip_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3394637560,
+                "dominator": 4165559961
+            },
+            "onnx::Conv_279": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2852540891,
+                "dominator": 2852540891
+            },
+            "onnx::Conv_280": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 2774717746,
+                "dominator": 2774717746
+            },
+            "/stage1/stage1.1/pointwise/pointwise.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3493160749,
+                "dominator": 964417025
+            }
+        },
+        "/stage1/stage1.1/Clip_1": {
+            "/stage1/stage1.1/pointwise/pointwise.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 4101332284,
+                "dominator": 964417025
+            },
+            "PPQ_Variable_18": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1732146959,
+                "dominator": 1732146959
+            },
+            "PPQ_Variable_4": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3342349718,
+                "dominator": 3342349718
+            },
+            "/stage1/stage1.1/Clip_1_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 964417025,
+                "dominator": 964417025
+            }
+        },
+        "/stage2/stage2.0/conv/conv.0/Conv": {
+            "/stage1/stage1.1/Clip_1_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3129893056,
+                "dominator": 964417025
+            },
+            "onnx::Conv_282": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3295575171,
+                "dominator": 3295575171
+            },
+            "onnx::Conv_283": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 2172056890,
+                "dominator": 2172056890
+            },
+            "/stage2/stage2.0/conv/conv.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 4103284501,
+                "dominator": 4103284501
+            }
+        },
+        "/stage2/stage2.0/conv/conv.2/Conv": {
+            "/stage2/stage2.0/conv/conv.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2920136068,
+                "dominator": 4103284501
+            },
+            "onnx::Conv_285": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3571480119,
+                "dominator": 3571480119
+            },
+            "onnx::Conv_286": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 2207307806,
+                "dominator": 2207307806
+            },
+            "/stage2/stage2.0/conv/conv.2/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2000031337,
+                "dominator": 2000031337
+            }
+        },
+        "/stage2/stage2.0/conv/conv.4/Conv": {
+            "/stage2/stage2.0/conv/conv.2/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 563304328,
+                "dominator": 2000031337
+            },
+            "onnx::Conv_288": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3309615147,
+                "dominator": 3309615147
+            },
+            "onnx::Conv_289": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 432333378,
+                "dominator": 432333378
+            },
+            "/stage2/stage2.0/conv/conv.4/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2780266493,
+                "dominator": 3063328721
+            }
+        },
+        "/stage2/stage2.0/Clip": {
+            "/stage2/stage2.0/conv/conv.4/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1291211468,
+                "dominator": 3063328721
+            },
+            "PPQ_Variable_19": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2141574751,
+                "dominator": 2141574751
+            },
+            "PPQ_Variable_5": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 289626022,
+                "dominator": 289626022
+            },
+            "/stage2/stage2.0/Clip_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3063328721,
+                "dominator": 3063328721
+            }
+        },
+        "/stage2/stage2.1/conv/conv.0/Conv": {
+            "/stage2/stage2.0/Clip_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 4069069648,
+                "dominator": 3063328721
+            },
+            "onnx::Conv_291": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3416040659,
+                "dominator": 3416040659
+            },
+            "onnx::Conv_292": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 663862346,
+                "dominator": 663862346
+            },
+            "/stage2/stage2.1/conv/conv.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1951601125,
+                "dominator": 1951601125
+            }
+        },
+        "/stage2/stage2.1/conv/conv.2/Conv": {
+            "/stage2/stage2.1/conv/conv.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3919396116,
+                "dominator": 1951601125
+            },
+            "onnx::Conv_294": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3200530311,
+                "dominator": 3200530311
+            },
+            "onnx::Conv_295": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 2301547566,
+                "dominator": 2301547566
+            },
+            "/stage2/stage2.1/conv/conv.2/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1367366201,
+                "dominator": 1367366201
+            }
+        },
+        "/stage2/stage2.1/conv/conv.4/Conv": {
+            "/stage2/stage2.1/conv/conv.2/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 843559960,
+                "dominator": 1367366201
+            },
+            "onnx::Conv_297": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2439897723,
+                "dominator": 2439897723
+            },
+            "onnx::Conv_298": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 594977618,
+                "dominator": 594977618
+            },
+            "/stage2/stage2.1/conv/conv.4/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 52067533,
+                "dominator": 52067533
+            }
+        },
+        "/stage2/stage2.1/Add": {
+            "PPQ_Variable_28": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1986305116,
+                "dominator": 1986305116
+            },
+            "/stage2/stage2.1/conv/conv.4/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 731199919,
+                "dominator": 731199919
+            },
+            "/stage2/stage2.1/Add_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3452333494,
+                "dominator": 3452333494
+            }
+        },
+        "/stage2/stage2.2/conv/conv.0/Conv": {
+            "/stage2/stage2.1/Add_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2501488033,
+                "dominator": 3452333494
+            },
+            "onnx::Conv_300": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 467360224,
+                "dominator": 467360224
+            },
+            "onnx::Conv_301": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 4262727971,
+                "dominator": 4262727971
+            },
+            "/stage2/stage2.2/conv/conv.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2380314458,
+                "dominator": 2380314458
+            }
+        },
+        "/stage2/stage2.2/conv/conv.2/Conv": {
+            "/stage2/stage2.2/conv/conv.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 759586997,
+                "dominator": 2380314458
+            },
+            "onnx::Conv_303": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1277333668,
+                "dominator": 1277333668
+            },
+            "onnx::Conv_304": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 4229332183,
+                "dominator": 4229332183
+            },
+            "/stage2/stage2.2/conv/conv.2/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2073117758,
+                "dominator": 2073117758
+            }
+        },
+        "/stage2/stage2.2/conv/conv.4/Conv": {
+            "/stage2/stage2.2/conv/conv.2/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 4031597065,
+                "dominator": 2073117758
+            },
+            "onnx::Conv_306": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2500076712,
+                "dominator": 2500076712
+            },
+            "onnx::Conv_307": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 3368997067,
+                "dominator": 3368997067
+            },
+            "/stage2/stage2.2/conv/conv.4/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 126949474,
+                "dominator": 2846521286
+            }
+        },
+        "/stage2/stage2.2/Clip": {
+            "/stage2/stage2.2/conv/conv.4/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3172162973,
+                "dominator": 2846521286
+            },
+            "PPQ_Variable_20": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 111229420,
+                "dominator": 111229420
+            },
+            "PPQ_Variable_6": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1835639039,
+                "dominator": 1835639039
+            },
+            "/stage2/stage2.2/Clip_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2846521286,
+                "dominator": 2846521286
+            }
+        },
+        "/stage2/stage2.3/conv/conv.0/Conv": {
+            "/stage2/stage2.2/Clip_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2991181681,
+                "dominator": 2846521286
+            },
+            "onnx::Conv_309": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 4072027248,
+                "dominator": 4072027248
+            },
+            "onnx::Conv_310": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 725729651,
+                "dominator": 725729651
+            },
+            "/stage2/stage2.3/conv/conv.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 974972522,
+                "dominator": 974972522
+            }
+        },
+        "/stage2/stage2.3/conv/conv.2/Conv": {
+            "/stage2/stage2.3/conv/conv.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2990674821,
+                "dominator": 974972522
+            },
+            "onnx::Conv_312": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2971580468,
+                "dominator": 2971580468
+            },
+            "onnx::Conv_313": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 1045710375,
+                "dominator": 1045710375
+            },
+            "/stage2/stage2.3/conv/conv.2/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2051090510,
+                "dominator": 2051090510
+            }
+        },
+        "/stage2/stage2.3/conv/conv.4/Conv": {
+            "/stage2/stage2.3/conv/conv.2/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1493294553,
+                "dominator": 2051090510
+            },
+            "onnx::Conv_315": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 228174136,
+                "dominator": 228174136
+            },
+            "onnx::Conv_316": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 2750710555,
+                "dominator": 2750710555
+            },
+            "/stage2/stage2.3/conv/conv.4/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2423079282,
+                "dominator": 2423079282
+            }
+        },
+        "/stage2/stage2.3/Add": {
+            "PPQ_Variable_31": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 412557933,
+                "dominator": 412557933
+            },
+            "/stage2/stage2.3/conv/conv.4/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1120742268,
+                "dominator": 1120742268
+            },
+            "/stage2/stage2.3/Add_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 968887375,
+                "dominator": 968887375
+            }
+        },
+        "/stage3/stage3.0/depthwise/depthwise.0/Conv": {
+            "/stage2/stage2.3/Add_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2065200598,
+                "dominator": 968887375
+            },
+            "onnx::Conv_318": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1873548609,
+                "dominator": 1873548609
+            },
+            "onnx::Conv_319": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 2794103552,
+                "dominator": 2794103552
+            },
+            "/stage3/stage3.0/depthwise/depthwise.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3369252291,
+                "dominator": 3510276983
+            }
+        },
+        "/stage3/stage3.0/Clip": {
+            "/stage3/stage3.0/depthwise/depthwise.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3208595834,
+                "dominator": 3510276983
+            },
+            "PPQ_Variable_21": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1851468373,
+                "dominator": 1851468373
+            },
+            "PPQ_Variable_7": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1800582084,
+                "dominator": 1800582084
+            },
+            "/stage3/stage3.0/Clip_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3510276983,
+                "dominator": 3510276983
+            }
+        },
+        "/stage3/stage3.0/pointwise/pointwise.0/Conv": {
+            "/stage3/stage3.0/Clip_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3590815838,
+                "dominator": 3510276983
+            },
+            "onnx::Conv_321": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 4249032105,
+                "dominator": 4249032105
+            },
+            "onnx::Conv_322": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 454640072,
+                "dominator": 454640072
+            },
+            "/stage3/stage3.0/pointwise/pointwise.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 699136363,
+                "dominator": 3346365343
+            }
+        },
+        "/stage3/stage3.0/Clip_1": {
+            "/stage3/stage3.0/pointwise/pointwise.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 497294978,
+                "dominator": 3346365343
+            },
+            "PPQ_Variable_22": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2598030141,
+                "dominator": 2598030141
+            },
+            "PPQ_Variable_8": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2940825868,
+                "dominator": 2940825868
+            },
+            "/stage3/stage3.0/Clip_1_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3346365343,
+                "dominator": 3346365343
+            }
+        },
+        "/stage3/stage3.1/depthwise/depthwise.0/Conv": {
+            "/stage3/stage3.0/Clip_1_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1366910950,
+                "dominator": 3346365343
+            },
+            "onnx::Conv_324": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2198175505,
+                "dominator": 2198175505
+            },
+            "onnx::Conv_325": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 1779017104,
+                "dominator": 1779017104
+            },
+            "/stage3/stage3.1/depthwise/depthwise.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1119088147,
+                "dominator": 3938870471
+            }
+        },
+        "/stage3/stage3.1/Clip": {
+            "/stage3/stage3.1/depthwise/depthwise.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3447775370,
+                "dominator": 3938870471
+            },
+            "PPQ_Variable_23": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1961272613,
+                "dominator": 1961272613
+            },
+            "PPQ_Variable_9": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3569320788,
+                "dominator": 3569320788
+            },
+            "/stage3/stage3.1/Clip_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3938870471,
+                "dominator": 3938870471
+            }
+        },
+        "/stage3/stage3.1/pointwise/pointwise.0/Conv": {
+            "/stage3/stage3.1/Clip_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 552422510,
+                "dominator": 3938870471
+            },
+            "onnx::Conv_327": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2331373945,
+                "dominator": 2331373945
+            },
+            "onnx::Conv_328": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 2278813272,
+                "dominator": 2278813272
+            },
+            "/stage3/stage3.1/pointwise/pointwise.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2130850747,
+                "dominator": 3752259311
+            }
+        },
+        "/stage3/stage3.1/Clip_1": {
+            "/stage3/stage3.1/pointwise/pointwise.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3020861330,
+                "dominator": 3752259311
+            },
+            "PPQ_Variable_24": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3646117901,
+                "dominator": 3646117901
+            },
+            "PPQ_Variable_10": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2679573148,
+                "dominator": 2679573148
+            },
+            "/stage3/stage3.1/Clip_1_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3752259311,
+                "dominator": 3752259311
+            }
+        },
+        "/stage3/stage3.2/depthwise/depthwise.0/Conv": {
+            "/stage3/stage3.1/Clip_1_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2239122934,
+                "dominator": 3752259311
+            },
+            "onnx::Conv_330": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3327855841,
+                "dominator": 3327855841
+            },
+            "onnx::Conv_331": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 52706336,
+                "dominator": 52706336
+            },
+            "/stage3/stage3.2/depthwise/depthwise.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1259498083,
+                "dominator": 4214536727
+            }
+        },
+        "/stage3/stage3.2/Clip": {
+            "/stage3/stage3.2/depthwise/depthwise.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1113238426,
+                "dominator": 4214536727
+            },
+            "PPQ_Variable_25": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1366918133,
+                "dominator": 1366918133
+            },
+            "PPQ_Variable_11": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3735430884,
+                "dominator": 3735430884
+            },
+            "/stage3/stage3.2/Clip_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 4214536727,
+                "dominator": 4214536727
+            }
+        },
+        "/stage3/stage3.2/pointwise/pointwise.0/Conv": {
+            "/stage3/stage3.2/Clip_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1044089982,
+                "dominator": 4214536727
+            },
+            "onnx::Conv_333": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3158274377,
+                "dominator": 3158274377
+            },
+            "onnx::Conv_334": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 4183469800,
+                "dominator": 4183469800
+            },
+            "/stage3/stage3.2/pointwise/pointwise.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 927216139,
+                "dominator": 766600767
+            }
+        },
+        "/stage3/stage3.2/Clip_1": {
+            "/stage3/stage3.2/pointwise/pointwise.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 231077026,
+                "dominator": 766600767
+            },
+            "PPQ_Variable_26": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1236650205,
+                "dominator": 1236650205
+            },
+            "PPQ_Variable_12": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3338074156,
+                "dominator": 3338074156
+            },
+            "/stage3/stage3.2/Clip_1_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 766600767,
+                "dominator": 766600767
+            }
+        },
+        "/head/head.0/Conv": {
+            "/stage3/stage3.2/Clip_1_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3371706374,
+                "dominator": 766600767
+            },
+            "onnx::Conv_336": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 133283505,
+                "dominator": 133283505
+            },
+            "onnx::Conv_337": {
+                "bit_width": 20,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -524288,
+                "quant_max": 524287,
+                "hash": 1527473840,
+                "dominator": 1527473840
+            },
+            "/head/head.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 710617779,
+                "dominator": 4244804455
+            }
+        },
+        "/head/head.2/Clip": {
+            "/head/head.0/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 948284074,
+                "dominator": 4244804455
+            },
+            "PPQ_Variable_27": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 3622356677,
+                "dominator": 3622356677
+            },
+            "PPQ_Variable_13": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "PASSIVE",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2710019700,
+                "dominator": 2710019700
+            },
+            "/head/head.2/Clip_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 4244804455,
+                "dominator": 4244804455
+            }
+        },
+        "/head/head.3/Conv": {
+            "/head/head.2/Clip_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 1920680078,
+                "dominator": 4244804455
+            },
+            "head.3.weight": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 663000345,
+                "dominator": 663000345
+            },
+            "/head/head.3/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2155774840,
+                "dominator": 2155774840
+            }
+        },
+        "/head/head.4/Sigmoid": {
+            "/head/head.3/Conv_output_0": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "OVERLAPPED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2751394907,
+                "dominator": 2155774840
+            },
+            "265": {
+                "bit_width": 8,
+                "policy": {
+                    "PER_TENSOR": true,
+                    "PER_CHANNEL": false,
+                    "LINEAR": true,
+                    "FLOATING": false,
+                    "SYMMETRICAL": true,
+                    "ASYMMETRICAL": false,
+                    "POWER_OF_2": true,
+                    "DYNAMIC": false
+                },
+                "state": "ACTIVATED",
+                "quant_min": -128,
+                "quant_max": 127,
+                "hash": 2854415794,
+                "dominator": 2854415794
+            }
+        }
+    },
+    "dispatchings": {
+        "/conv1/conv1.0/Conv": "ESPDL_S3_INT8",
+        "/Clip": "ESPDL_S3_INT8",
+        "/stage1/stage1.0/depthwise/depthwise.0/Conv": "ESPDL_S3_INT8",
+        "/stage1/stage1.0/Clip": "ESPDL_S3_INT8",
+        "/stage1/stage1.0/pointwise/pointwise.0/Conv": "ESPDL_S3_INT8",
+        "/stage1/stage1.0/Clip_1": "ESPDL_S3_INT8",
+        "/stage1/stage1.1/depthwise/depthwise.0/Conv": "ESPDL_S3_INT8",
+        "/stage1/stage1.1/Clip": "ESPDL_S3_INT8",
+        "/stage1/stage1.1/pointwise/pointwise.0/Conv": "ESPDL_S3_INT8",
+        "/stage1/stage1.1/Clip_1": "ESPDL_S3_INT8",
+        "/stage2/stage2.0/conv/conv.0/Conv": "ESPDL_S3_INT8",
+        "/stage2/stage2.0/conv/conv.2/Conv": "ESPDL_S3_INT8",
+        "/stage2/stage2.0/conv/conv.4/Conv": "ESPDL_S3_INT8",
+        "/stage2/stage2.0/Clip": "ESPDL_S3_INT8",
+        "/stage2/stage2.1/conv/conv.0/Conv": "ESPDL_S3_INT8",
+        "/stage2/stage2.1/conv/conv.2/Conv": "ESPDL_S3_INT8",
+        "/stage2/stage2.1/conv/conv.4/Conv": "ESPDL_S3_INT8",
+        "/stage2/stage2.1/Add": "ESPDL_S3_INT8",
+        "/stage2/stage2.2/conv/conv.0/Conv": "ESPDL_S3_INT8",
+        "/stage2/stage2.2/conv/conv.2/Conv": "ESPDL_S3_INT8",
+        "/stage2/stage2.2/conv/conv.4/Conv": "ESPDL_S3_INT8",
+        "/stage2/stage2.2/Clip": "ESPDL_S3_INT8",
+        "/stage2/stage2.3/conv/conv.0/Conv": "ESPDL_S3_INT8",
+        "/stage2/stage2.3/conv/conv.2/Conv": "ESPDL_S3_INT8",
+        "/stage2/stage2.3/conv/conv.4/Conv": "ESPDL_S3_INT8",
+        "/stage2/stage2.3/Add": "ESPDL_S3_INT8",
+        "/stage3/stage3.0/depthwise/depthwise.0/Conv": "ESPDL_S3_INT8",
+        "/stage3/stage3.0/Clip": "ESPDL_S3_INT8",
+        "/stage3/stage3.0/pointwise/pointwise.0/Conv": "ESPDL_S3_INT8",
+        "/stage3/stage3.0/Clip_1": "ESPDL_S3_INT8",
+        "/stage3/stage3.1/depthwise/depthwise.0/Conv": "ESPDL_S3_INT8",
+        "/stage3/stage3.1/Clip": "ESPDL_S3_INT8",
+        "/stage3/stage3.1/pointwise/pointwise.0/Conv": "ESPDL_S3_INT8",
+        "/stage3/stage3.1/Clip_1": "ESPDL_S3_INT8",
+        "/stage3/stage3.2/depthwise/depthwise.0/Conv": "ESPDL_S3_INT8",
+        "/stage3/stage3.2/Clip": "ESPDL_S3_INT8",
+        "/stage3/stage3.2/pointwise/pointwise.0/Conv": "ESPDL_S3_INT8",
+        "/stage3/stage3.2/Clip_1": "ESPDL_S3_INT8",
+        "/head/head.0/Conv": "ESPDL_S3_INT8",
+        "/head/head.2/Clip": "ESPDL_S3_INT8",
+        "/head/head.3/Conv": "ESPDL_S3_INT8",
+        "/head/head.4/Sigmoid": "ESPDL_S3_INT8"
+    },
+    "values": {
+        "1581038040": {
+            "scale": 0.015625,
+            "zero_point": 0.0
+        },
+        "878039355": {
+            "scale": 0.0078125,
+            "zero_point": 0.0
+        },
+        "2724845330": {
+            "scale": 0.0001220703125,
+            "zero_point": 0.0
+        },
+        "3268658287": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "1160105334": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "2745863777": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "1501165539": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "1094320922": {
+            "scale": 0.0009765625,
+            "zero_point": 0.0
+        },
+        "1487962007": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "1455307774": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "936731337": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "3013980043": {
+            "scale": 0.015625,
+            "zero_point": 0.0
+        },
+        "4135025698": {
+            "scale": 0.00048828125,
+            "zero_point": 0.0
+        },
+        "2185370559": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "1543243654": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "4106494001": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "1868339251": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "320299562": {
+            "scale": 0.001953125,
+            "zero_point": 0.0
+        },
+        "3610130663": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "1819168782": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "4165559961": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "2852540891": {
+            "scale": 0.0078125,
+            "zero_point": 0.0
+        },
+        "2774717746": {
+            "scale": 0.000244140625,
+            "zero_point": 0.0
+        },
+        "1732146959": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "3342349718": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "964417025": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "3295575171": {
+            "scale": 0.015625,
+            "zero_point": 0.0
+        },
+        "2172056890": {
+            "scale": 0.00048828125,
+            "zero_point": 0.0
+        },
+        "4103284501": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "3571480119": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "2207307806": {
+            "scale": 0.001953125,
+            "zero_point": 0.0
+        },
+        "2000031337": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "3309615147": {
+            "scale": 0.00390625,
+            "zero_point": 0.0
+        },
+        "432333378": {
+            "scale": 0.000244140625,
+            "zero_point": 0.0
+        },
+        "2141574751": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "289626022": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "3063328721": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "3416040659": {
+            "scale": 0.015625,
+            "zero_point": 0.0
+        },
+        "663862346": {
+            "scale": 0.00048828125,
+            "zero_point": 0.0
+        },
+        "1951601125": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "3200530311": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "2301547566": {
+            "scale": 0.001953125,
+            "zero_point": 0.0
+        },
+        "1367366201": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "2439897723": {
+            "scale": 0.00390625,
+            "zero_point": 0.0
+        },
+        "594977618": {
+            "scale": 0.000244140625,
+            "zero_point": 0.0
+        },
+        "52067533": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "1986305116": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "731199919": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "3452333494": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "467360224": {
+            "scale": 0.00390625,
+            "zero_point": 0.0
+        },
+        "4262727971": {
+            "scale": 0.000244140625,
+            "zero_point": 0.0
+        },
+        "2380314458": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "1277333668": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "4229332183": {
+            "scale": 0.00390625,
+            "zero_point": 0.0
+        },
+        "2073117758": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "2500076712": {
+            "scale": 0.001953125,
+            "zero_point": 0.0
+        },
+        "3368997067": {
+            "scale": 0.0001220703125,
+            "zero_point": 0.0
+        },
+        "111229420": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "1835639039": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "2846521286": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "4072027248": {
+            "scale": 0.015625,
+            "zero_point": 0.0
+        },
+        "725729651": {
+            "scale": 0.00048828125,
+            "zero_point": 0.0
+        },
+        "974972522": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "2971580468": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "1045710375": {
+            "scale": 0.001953125,
+            "zero_point": 0.0
+        },
+        "2051090510": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "228174136": {
+            "scale": 0.0078125,
+            "zero_point": 0.0
+        },
+        "2750710555": {
+            "scale": 0.000244140625,
+            "zero_point": 0.0
+        },
+        "2423079282": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "412557933": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "1120742268": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "968887375": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "1873548609": {
+            "scale": 0.0078125,
+            "zero_point": 0.0
+        },
+        "2794103552": {
+            "scale": 0.00048828125,
+            "zero_point": 0.0
+        },
+        "1851468373": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "1800582084": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "3510276983": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "4249032105": {
+            "scale": 0.015625,
+            "zero_point": 0.0
+        },
+        "454640072": {
+            "scale": 0.0009765625,
+            "zero_point": 0.0
+        },
+        "2598030141": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "2940825868": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "3346365343": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "2198175505": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "1779017104": {
+            "scale": 0.001953125,
+            "zero_point": 0.0
+        },
+        "1961272613": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "3569320788": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "3938870471": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "2331373945": {
+            "scale": 0.0078125,
+            "zero_point": 0.0
+        },
+        "2278813272": {
+            "scale": 0.000244140625,
+            "zero_point": 0.0
+        },
+        "3646117901": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "2679573148": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "3752259311": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "3327855841": {
+            "scale": 0.015625,
+            "zero_point": 0.0
+        },
+        "52706336": {
+            "scale": 0.0009765625,
+            "zero_point": 0.0
+        },
+        "1366918133": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "3735430884": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "4214536727": {
+            "scale": 0.0625,
+            "zero_point": 0.0
+        },
+        "3158274377": {
+            "scale": 0.015625,
+            "zero_point": 0.0
+        },
+        "4183469800": {
+            "scale": 0.0009765625,
+            "zero_point": 0.0
+        },
+        "1236650205": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "3338074156": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "766600767": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "133283505": {
+            "scale": 0.015625,
+            "zero_point": 0.0
+        },
+        "1527473840": {
+            "scale": 0.00048828125,
+            "zero_point": 0.0
+        },
+        "3622356677": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "2710019700": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "4244804455": {
+            "scale": 0.03125,
+            "zero_point": 0.0
+        },
+        "663000345": {
+            "scale": 0.015625,
+            "zero_point": 0.0
+        },
+        "2155774840": {
+            "scale": 0.125,
+            "zero_point": 0.0
+        },
+        "2854415794": {
+            "scale": 0.0078125,
+            "zero_point": 0.0
+        }
+    }
+}
