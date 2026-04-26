@@ -10,7 +10,10 @@
 #include "esp_camera.h"
 
 // 坐姿检测测试模式：1=仅运行模型测试(test), 0=运行实际推理
-#define POSTURE_TEST_MODE 1
+#define POSTURE_TEST_MODE 0
+
+// 静态图像测试模式：1=使用静态图像数据测试, 0=使用相机图像
+#define POSTURE_TEST_IMAGE_MODE 0
 
 #ifdef __cplusplus
 extern "C" {

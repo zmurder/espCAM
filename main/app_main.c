@@ -76,7 +76,7 @@ static void posture_inference_task(void* arg)
     posture_model_deinit();
     vTaskDelete(NULL);
 #else
-    // 实际推理模式：无限循环进行姿态检测
+    // 实际推理模式：一次捕获，同时用于推理和UDP发送
     while (1) {
         camera_fb_t* fb = esp_camera_fb_get();
         if (fb == NULL) {
@@ -85,8 +85,14 @@ static void posture_inference_task(void* arg)
             continue;
         }
 
+        // 先发送图像到PC（用于调试显示）
+        send_image_via_udp(fb);
+
+        // 再进行姿态推理
         posture_output_t output;
         ret = posture_model_run_inference(fb, &output);
+
+        // 释放帧缓冲（在推理函数外部释放，确保图像已发送）
         esp_camera_fb_return(fb);
 
         if (ret == ESP_OK) {
@@ -101,14 +107,18 @@ static void posture_inference_task(void* arg)
                 ESP_LOGE(TAG, "Posture: BAD - shoulder issue");
                 audio_player_play_posture_alert(POSTURE_BAD_SHOULDER);
             }
-            else {
+            else if (output.result == POSTURE_NOT_DETECTED) {
                 ESP_LOGW(TAG, "Posture: Keypoints not detected");
             }
+
+            // 发送姿态结果到 PC 用于调试显示
+            send_posture_result_via_udp(&output);
 
             ESP_LOGI(TAG, "Inference latency: %lu us", (unsigned long)posture_model_get_last_latency_us());
         }
 
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        // 推理间隔2秒，避免过于频繁
+        vTaskDelay(pdMS_TO_TICKS(2000));
     }
 
     posture_model_deinit();
@@ -202,6 +212,10 @@ void app_main(void)
     // 打印最终中断分配情况
     esp_intr_dump(NULL);
 
-    // 启动坐姿检测推理任务（不使用 UDP 图像传输）
+    // 启动坐姿检测推理任务（图像捕获、推理、UDP发送都在此任务中完成）
     xTaskCreatePinnedToCore(posture_inference_task, "posture_inf", 32768, NULL, 5, NULL, 0);
+
+    // 注意：UDP图像传输已合并到 posture_inference_task 中，不再单独启动
+    // 如果需要独立的UDP相机任务，可以取消下面这行的注释
+    // start_udp_camera();
 }

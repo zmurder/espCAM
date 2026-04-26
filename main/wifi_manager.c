@@ -58,7 +58,8 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
     }
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t* event = (wifi_event_sta_disconnected_t*)event_data;
-        ESP_LOGI(TAG_STA, "Station disconnected, reason:%d", event->reason);
+        // reason code: 1=unspecified, 2=auth_expire, 3=too_many_assoc, 4=sta_leaving, 5=disconnect_by_ap, 6=sta_disconnect_by_ap, 15=4way_handshake_timeout, etc.
+        ESP_LOGW(TAG_STA, "Station disconnected, reason:%d (1=unspec, 2=auth_expire, 4=sta_leaving, 5=disconnect_by_ap, 6=ap_disconnect, 15=4way_timeout, 16=recv_disassoc, 17=recv_auth)", event->reason);
         if (s_retry_num < WIFI_MAXIMUM_RETRY) {
             esp_wifi_connect();
             s_retry_num++;

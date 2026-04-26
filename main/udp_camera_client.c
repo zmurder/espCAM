@@ -24,6 +24,9 @@ static const char* TAG = "UDP_CAMERA";
 // PC发送语音的端口
 #define UDP_AUDIO_PORT 8081
 
+// 姿态检测结果发送端口
+#define UDP_POSTURE_PORT 8082
+
 // UDP相关参数
 #define MAX_UDP_PACKET_SIZE 1400  // MTU限制
 #define RECV_TIMEOUT_MS 5000
@@ -55,6 +58,7 @@ static float current_fps = 0.0f;
 static int s_udp_socket = -1;
 static int s_audio_socket = -1;  // 新增音频接收socket
 static struct sockaddr_in s_dest_addr;
+static struct sockaddr_in s_posture_dest_addr;  // 姿态结果目标地址
 static bool s_socket_initialized = false;
 static bool s_audio_socket_initialized = false;
 
@@ -95,6 +99,12 @@ static esp_err_t init_udp_socket_once(void)
     s_dest_addr.sin_family = AF_INET;
     s_dest_addr.sin_port = htons(UDP_SERVER_PORT);
     inet_aton(UDP_SERVER_IP, &s_dest_addr.sin_addr);
+
+    // 设置姿态结果目标地址（同一IP，不同端口）
+    memset(&s_posture_dest_addr, 0, sizeof(struct sockaddr_in));
+    s_posture_dest_addr.sin_family = AF_INET;
+    s_posture_dest_addr.sin_port = htons(UDP_POSTURE_PORT);
+    inet_aton(UDP_SERVER_IP, &s_posture_dest_addr.sin_addr);
 
     s_socket_initialized = true;
     ESP_LOGI(TAG, "UDP socket初始化成功，目标地址: %s:%d", UDP_SERVER_IP, UDP_SERVER_PORT);
@@ -266,9 +276,11 @@ esp_err_t send_image_via_udp(camera_fb_t* fb)
     size_t total_size = fb->len;
     size_t bytes_sent = 0;
     uint32_t chunk_idx = 0;
-    uint32_t total_chunks = (total_size + sizeof(((udp_image_chunk_t*)0)->data) - 1) / sizeof(((udp_image_chunk_t*)0)->data);
+    size_t data_size = sizeof(((udp_image_chunk_t*)0)->data);
+    uint32_t total_chunks = (total_size + data_size - 1) / data_size;
 
-    ESP_LOGI(TAG, "开始发送图像，大小: %lu bytes, 分 %lu 包", (unsigned long)total_size, (unsigned long)total_chunks);
+    ESP_LOGI(TAG, "开始发送图像，大小: %lu bytes, 数据区: %lu bytes, 分 %lu 包",
+             (unsigned long)total_size, (unsigned long)data_size, (unsigned long)total_chunks);
 
     // 使用静态变量避免栈上分配大数组
     static udp_image_chunk_t chunk;
@@ -280,9 +292,25 @@ esp_err_t send_image_via_udp(camera_fb_t* fb)
 
         // 计算当前包的数据大小
         size_t remaining = total_size - bytes_sent;
-        size_t copy_size = (remaining > sizeof(chunk.data)) ? sizeof(chunk.data) : remaining;
+        size_t copy_size = (remaining > data_size) ? data_size : remaining;
 
         memcpy(chunk.data, fb->buf + bytes_sent, copy_size);
+
+        // 调试：打印每个包的前16字节和最后16字节
+        if (chunk_idx == 0) {
+            ESP_LOGI(TAG, "Chunk0 前16字节: %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x",
+                    chunk.data[0], chunk.data[1], chunk.data[2], chunk.data[3],
+                    chunk.data[4], chunk.data[5], chunk.data[6], chunk.data[7],
+                    chunk.data[8], chunk.data[9], chunk.data[10], chunk.data[11],
+                    chunk.data[12], chunk.data[13], chunk.data[14], chunk.data[15]);
+            // 打印最后16字节
+            int last_idx = (copy_size > 16) ? (copy_size - 16) : 0;
+            ESP_LOGI(TAG, "Chunk0 后16字节: %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x",
+                    chunk.data[last_idx], chunk.data[last_idx+1], chunk.data[last_idx+2], chunk.data[last_idx+3],
+                    chunk.data[last_idx+4], chunk.data[last_idx+5], chunk.data[last_idx+6], chunk.data[last_idx+7],
+                    chunk.data[last_idx+8], chunk.data[last_idx+9], chunk.data[last_idx+10], chunk.data[last_idx+11],
+                    chunk.data[last_idx+12], chunk.data[last_idx+13], chunk.data[last_idx+14], chunk.data[last_idx+15]);
+        }
 
         // 发送包（使用复用的socket和目标地址）
         ssize_t sent = sendto(s_udp_socket, &chunk, sizeof(uint32_t) * 3 + copy_size, 0, (struct sockaddr*)&s_dest_addr, sizeof(struct sockaddr_in));
@@ -297,8 +325,8 @@ esp_err_t send_image_via_udp(camera_fb_t* fb)
         bytes_sent += copy_size;
         chunk_idx++;
 
-        // 优化：减少延迟，提高传输速度
-        vTaskDelay(pdMS_TO_TICKS(5));
+        // 增加延迟，确保包正确发送
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 
     ESP_LOGI(TAG, "图像发送完成，共 %lu bytes", (unsigned long)total_size);
@@ -456,4 +484,57 @@ void start_udp_camera()
     led_set_state(LED_STATE_BREATH);
     // 增加任务栈大小以处理图像数据
     xTaskCreate(udp_camera_task, "udp_camera_task", 8192, NULL, 5, &s_udp_task_handle);
+}
+
+/**
+ * @brief 发送姿态检测结果通过UDP
+ *
+ * @param output 姿态检测结果
+ */
+void send_posture_result_via_udp(const posture_output_t* output)
+{
+    // 初始化socket（如果尚未初始化）
+    if (init_udp_socket_once() != ESP_OK) {
+        return;
+    }
+
+    // 姿态结果 UDP 包格式：
+    // - 包类型: 0x02 (姿态结果)
+    // - result: 1字节
+    // - ratio: 4字节 float
+    // - keypoints: 7 * (4*float + 4*float + 4*float) = 7 * 12 = 84字节
+    // 总共: 1 + 4 + 84 = 89字节
+
+    static uint8_t posture_buf[128];
+    int offset = 0;
+
+    // 包类型
+    posture_buf[offset++] = 0x02;
+
+    // result
+    posture_buf[offset++] = (uint8_t)output->result;
+
+    // ratio (float)
+    float ratio = output->ratio;
+    memcpy(&posture_buf[offset], &ratio, sizeof(float));
+    offset += sizeof(float);
+
+    // keypoints (7个关键点，每个: x, y, score 各4字节)
+    for (int i = 0; i < KEYPOINT_COUNT; i++) {
+        memcpy(&posture_buf[offset], &output->keypoints[i].x, sizeof(float));
+        offset += sizeof(float);
+        memcpy(&posture_buf[offset], &output->keypoints[i].y, sizeof(float));
+        offset += sizeof(float);
+        memcpy(&posture_buf[offset], &output->keypoints[i].score, sizeof(float));
+        offset += sizeof(float);
+    }
+
+    // 发送到姿态结果专用端口
+    ssize_t sent = sendto(s_udp_socket, posture_buf, offset, 0,
+                          (struct sockaddr*)&s_posture_dest_addr, sizeof(struct sockaddr_in));
+    if (sent < 0) {
+        ESP_LOGE(TAG, "发送姿态结果UDP失败: errno %d", errno);
+    } else {
+        ESP_LOGI(TAG, "发送姿态结果: result=%d, ratio=%.3f", output->result, output->ratio);
+    }
 }
