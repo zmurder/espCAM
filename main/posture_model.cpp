@@ -45,10 +45,6 @@ static uint32_t s_last_latency_us = 0;
 #define POSTURE_RATIO_MAX 0.8f
 #define HEATMAP_THRESHOLD 0.05f
 
-// ImageNet 归一化参数（与 Python 测试脚本一致）
-static const float IMAGENET_MEAN[3] = {0.485f, 0.456f, 0.406f};  // 已乘 255: 123.675, 116.28, 103.53
-static const float IMAGENET_STD[3] = {0.229f, 0.224f, 0.225f};   // 已乘 255: 58.395, 57.12, 57.375
-
 // Letterbox padding 值
 #define LETTERBOX_PAD 114
 
@@ -61,10 +57,11 @@ static inline float dequantize(int8_t q, int exponent)
 }
 
 /**
- * @brief 前处理: JPEG → Letterbox + ImageNet归一化 + 量化 → NHWC
+ * @brief 前处理: JPEG → Letterbox + 简单归一化(/255) + 量化 → NHWC
  *
- * 与 Python 测试脚本一致:
- * transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+ * 与官方 yolo11_pose 例子一致:
+ * ImagePreprocessor with mean={0,0,0}, std={255,255,255}
+ * 即简单 pixel / 255.0f
  */
 static void preprocess(const uint8_t* rgb, int src_w, int src_h, int8_t* output_buf,
                       int* out_pad_left, int* out_pad_top, float* out_scale)
@@ -86,20 +83,19 @@ static void preprocess(const uint8_t* rgb, int src_w, int src_h, int8_t* output_
     ESP_LOGI(TAG, "Preprocess: src=%dx%d, scaled=%dx%d, pad=(%d,%d), scale=%.4f",
              src_w, src_h, scaled_w, scaled_h, pad_left, pad_top, scale);
 
-    // 清空输出 buffer（填充 letterbox 背景色）
-    // 背景色是 (114,114,114)，需要做 ImageNet 归一化
+    // 清空输出 buffer（填充 letterbox 背景色 114）
     for (int h = 0; h < MODEL_INPUT_H; h++) {
         for (int w = 0; w < MODEL_INPUT_W; w++) {
             for (int c = 0; c < MODEL_INPUT_C; c++) {
-                // (114 - mean[c]) / std[c]，然后量化
-                float normalized = (114.0f - IMAGENET_MEAN[c] * 255.0f) / (IMAGENET_STD[c] * 255.0f);
+                // 简单归一化: (114 - 0) / 255 = 0.447
+                float normalized = 114.0f / 255.0f;
                 int idx = h * MODEL_INPUT_W * MODEL_INPUT_C + w * MODEL_INPUT_C + c;
                 output_buf[idx] = dl::quantize<int8_t>(normalized, DL_RESCALE(INPUT_EXPONENT));
             }
         }
     }
 
-    // 处理实际图像区域（最近邻缩放 + ImageNet 归一化）
+    // 处理实际图像区域（最近邻缩放 + 简单归一化 /255）
     for (int y = 0; y < scaled_h; y++) {
         for (int x = 0; x < scaled_w; x++) {
             int dst_y = pad_top + y;
@@ -114,9 +110,9 @@ static void preprocess(const uint8_t* rgb, int src_w, int src_h, int8_t* output_
             int src_idx = src_y * src_w * 3 + src_x * 3;
 
             for (int c = 0; c < MODEL_INPUT_C; c++) {
-                // ImageNet 归一化: (pixel/255 - mean) / std
+                // 简单归一化: pixel / 255.0f (与官方 yolo11_pose 一致)
                 float pixel = (float)rgb[src_idx + c];
-                float normalized = (pixel / 255.0f - IMAGENET_MEAN[c]) / IMAGENET_STD[c];
+                float normalized = pixel / 255.0f;
                 int idx = dst_y * MODEL_INPUT_W * MODEL_INPUT_C + dst_x * MODEL_INPUT_C + c;
                 output_buf[idx] = dl::quantize<int8_t>(normalized, DL_RESCALE(INPUT_EXPONENT));
             }
