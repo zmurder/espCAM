@@ -18,7 +18,7 @@
 static const char* TAG = "UDP_CAMERA";
 
 // 目标PC的IP地址和端口
-#define UDP_SERVER_IP "192.168.5.3"  // 替换为你的PC的IP地址，请根据实际情况修改
+#define UDP_SERVER_IP "192.168.31.126"  // 替换为你的PC的IP地址，请根据实际情况修改
 #define UDP_SERVER_PORT 8080
 
 // PC发送语音的端口

@@ -271,3 +271,18 @@ esp_err_t audio_player_play_wifi_status(int status)
     ESP_LOGI(TAG, "Playing WiFi status audio: %d", status);
     return audio_player_play_stream((uint8_t*)audio_data, data_size);
 }
+
+esp_err_t audio_player_play_posture_alert(posture_result_t posture_result)
+{
+    if (!i2s_initialized) {
+        ESP_LOGE(TAG, "Audio player not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    // TODO: 替换为实际的坐姿提示音文件
+    // 需要用户提供坐姿提示音文件，放在 res/ 目录下
+    // 目前使用 wifi_beak_audio 作为占位提示音
+
+    ESP_LOGI(TAG, "Playing posture alert for result: %d", posture_result);
+    return audio_player_play_stream((uint8_t*)wifi_beak_audio, WIFI_BEAK_AUDIO_LEN);
+}

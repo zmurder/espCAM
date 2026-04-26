@@ -2,6 +2,7 @@
 #define AUDIO_PLAYER_H
 
 #include "esp_err.h"
+#include "posture_model.h"  // 引入 posture_result_t
 
 /**
  * @brief 初始化音频播放功能
@@ -37,6 +38,13 @@ esp_err_t audio_player_stop();
  * @return esp_err_t
  */
 esp_err_t audio_player_play_stream(uint8_t* audio_data, size_t data_size);
+
+/**
+ * @brief 播放坐姿提示音
+ * @param posture_result 姿态判断结果
+ * @return esp_err_t
+ */
+esp_err_t audio_player_play_posture_alert(posture_result_t posture_result);
 
 /**
  * @brief 去初始化音频播放功能

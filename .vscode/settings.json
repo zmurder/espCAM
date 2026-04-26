@@ -3,7 +3,7 @@
   "idf.openOcdConfigs": [
     "board/esp32s3-builtin.cfg"
   ],
-  "idf.portWin": "COM7",
+  "idf.portWin": "COM4",
   "idf.currentSetup": "d:\\esp\\v5.4.2\\esp-idf",
   "idf.customExtraVars": {
     "IDF_TARGET": "esp32s3"
@@ -14,5 +14,5 @@
     "--query-driver=d:\\esp-tools\\tools\\xtensa-esp-elf\\esp-14.2.0_20241119\\xtensa-esp-elf\\bin\\xtensa-esp32-elf-gcc.exe",
     "--compile-commands-dir=c:\\Users\\zyd\\espCAM\\build"
   ],
-  "idf.flashType": "JTAG"
+  "idf.flashType": "UART"
 }

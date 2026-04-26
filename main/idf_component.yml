@@ -16,3 +16,4 @@ dependencies:
   #   public: true
   espressif/esp32-camera: '*'
   espressif/mdns: ^1.9.1
+  espressif/esp-dl: '*'
