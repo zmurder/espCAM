@@ -53,7 +53,7 @@ static camera_config_t camera_config = {
     .frame_size = FRAMESIZE_QVGA,    // FRAMESIZE_VGA,     // FRAMESIZE_QVGA,    // QQVGA-UXGA, For ESP32, do not use sizes above QVGA when not JPEG. The performance of the
                                      //   ESP32-S series has improved a lot, but JPEG mode always gives better frame rates.
 
-    .jpeg_quality = 5,  // 0-63, for OV series camera sensors, lower number means higher quality
+    .jpeg_quality = 10,  // 0-63, for OV series camera sensors, lower number means higher quality
     .fb_count = 2,       // When jpeg mode is used, if fb_count more than one, the driver will work in continuous mode.
     .fb_location = CAMERA_FB_IN_PSRAM,
     .grab_mode = CAMERA_GRAB_WHEN_EMPTY,  // CAMERA_GRAB_WHEN_EMPTY,  // CAMERA_GRAB_LATEST. Sets when buffers should be filled
@@ -92,38 +92,7 @@ esp_err_t camera_init()
         ESP_LOGI(TAG, "Camera Init Success");
     }
 
-    // 配置传感器参数以提高图像质量
-    sensor_t* s = esp_camera_sensor_get();
-    if (s != NULL) {
-        // 设置曝光 (0-1200, 0=自动)
-        s->set_exposure_ctrl(s, 1);  // 1=启用自动曝光
 
-        // 设置白平衡 (0=自动)
-        s->set_whitebal(s, 1);  // 1=启用自动白平衡
-
-        // 设置增益 (0=自动)
-        s->set_agc_gain(s, 0);  // 0=自动增益
-
-        // 设置亮度 (-2 to 2)
-        s->set_brightness(s, 0);
-
-        // 设置对比度 (-2 to 2)
-        s->set_contrast(s, 0);
-
-        // 设置饱和度 (-2 to 2)
-        s->set_saturation(s, 0);
-
-        // 设置清晰度 (0-3)
-        s->set_sharpness(s, 1);
-
-        // 设置垂直翻转
-        s->set_vflip(s, 0);
-
-        // 设置水平镜像
-        s->set_hmirror(s, 0);
-
-        ESP_LOGI(TAG, "Sensor configured for better quality");
-    }
 
     return ESP_OK;
 }

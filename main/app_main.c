@@ -35,6 +35,10 @@ static const char* TAG = "APP_MAIN";
 
 #define WIFI_CONFIG_BUTTON_GPIO 14
 
+// UDP 输出开关：每推理一帧，发一帧图像(8080) + 一帧检测结果(8082)
+#define SEND_IMAGE_VIA_UDP   1   // 1=发送推理帧 JPEG 到 8080
+#define SEND_RESULT_VIA_UDP  1   // 1=发送检测结果(关键点)到 8082
+
 static void audio_player_init_task(void* arg)
 {
     ESP_LOGI(TAG, "Audio player init task running on CPU core %d", xPortGetCoreID());
@@ -85,15 +89,9 @@ static void posture_inference_task(void* arg)
             continue;
         }
 
-        // 先发送图像到PC（用于调试显示）
-        send_image_via_udp(fb);
-
-        // 再进行姿态推理
+        // 姿态推理
         posture_output_t output;
         ret = posture_model_run_inference(fb, &output);
-
-        // 释放帧缓冲（在推理函数外部释放，确保图像已发送）
-        esp_camera_fb_return(fb);
 
         if (ret == ESP_OK) {
             if (output.result == POSTURE_OK) {
@@ -111,14 +109,22 @@ static void posture_inference_task(void* arg)
                 ESP_LOGW(TAG, "Posture: Keypoints not detected");
             }
 
-            // 发送姿态结果到 PC 用于调试显示
+            // UDP 输出：先结果(8082)后图像(8080)，PC 收到图像时结果已到，可直接叠加
+            #if SEND_RESULT_VIA_UDP
             send_posture_result_via_udp(&output);
+            #endif
+            #if SEND_IMAGE_VIA_UDP
+            send_image_via_udp(fb);   // 推理一张发一张（fb 须在下方 return 前使用）
+            #endif
 
             ESP_LOGI(TAG, "Inference latency: %lu us", (unsigned long)posture_model_get_last_latency_us());
         }
 
-        // 推理间隔2秒，避免过于频繁
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        // 释放帧缓冲：放在 UDP 发送之后，确保 send_image_via_udp 用的 fb 数据有效
+        esp_camera_fb_return(fb);
+
+        // 推理间隔：给 wifi/其他任务喘息
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
 
     posture_model_deinit();
@@ -212,10 +218,9 @@ void app_main(void)
     // 打印最终中断分配情况
     esp_intr_dump(NULL);
 
-    // 启动坐姿检测推理任务（图像捕获、推理、UDP发送都在此任务中完成）
-    xTaskCreatePinnedToCore(posture_inference_task, "posture_inf", 32768, NULL, 5, NULL, 0);
+    // 启动坐姿检测推理任务（core 1，避开 core 0 的 wifi 任务争用 CPU）
+    xTaskCreatePinnedToCore(posture_inference_task, "posture_inf", 32768, NULL, 5, NULL, 1);
 
-    // 注意：UDP图像传输已合并到 posture_inference_task 中，不再单独启动
-    // 如果需要独立的UDP相机任务，可以取消下面这行的注释
+    // 禁用独立 start_udp_camera()：图像改为随推理发送（posture_inference_task 内推理一张发一张）
     // start_udp_camera();
 }

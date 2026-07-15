@@ -59,26 +59,27 @@ app_main.c                    # 入口点 - 初始化所有子系统
 
 ### 坐姿检测模型
 
-**参考官方示例：** `ref/esp-dl-master/examples/yolo11_pose`
+**模型文件：** `model/litepose_esp32s3.espdl`
 
-模型文件：`model/litepose_esp32s3_test.espdl`
+**模型规格（详见 `model/model_specification.md`）：**
 
-**模型加载方式：** 嵌入 rodata（`MODEL_LOCATION_IN_FLASH_RODATA`）
-- 模型文件通过 `EMBED_FILES` 嵌入 app 二进制
-- 分区表：`partitions.csv`（16MB Flash，factory=4MB）
-- 优点：简单，修改模型需重烧 app
+| 属性 | 值 |
+| :--- | :--- |
+| 参数量 | 96,648 |
+| 模型大小 | 144KB |
+| 量化方式 | PTQ 8bit |
+| 输入形状 | [1, 3, 240, 320] (CHW) |
+| 输出形状 | [1, 7, 60, 80] |
 
-**输入：**
-- 形状：[1, 3, 240, 320]（batch=1, RGB, 高240, 宽320）
-- 预处理：JPEG 解码（`dl::image::sw_decode_jpeg`），HWC→CHW 转换
-
-**输出：**
-- 形状：[1, 7, 60, 80]（7 个关键点的热力图，每个 60×80 像素）
-- 值范围：[0, 1]（Sigmoid 输出）
+**前处理（使用 ImagePreprocessor）：**
+- Letterbox resize：保持宽高比，padding {114,114,114} 居中
+- 归一化：pixel / 255.0f（简单 /255，不是 ImageNet）
+- HWC→CHW 转换（自动处理）
+- 量化：exponent=-7
 
 **7 个关键点顺序：** 0=左眼, 1=右眼, 2=左耳, 3=右耳, 4=鼻子, 5=左肩, 6=右肩
 
-**姿态判断逻辑：** 计算眼睛连线与肩膀连线的距离比值，判断是否偏离正常范围（0.3~0.8），超阈值时播放提示音。
+**姿态判断逻辑：** 计算眼睛连线与肩膀连线的距离比值，判断是否偏离正常范围（0.25~0.65），超阈值时播放提示音。
 
 ### 主要文件
 
@@ -95,8 +96,9 @@ app_main.c                    # 入口点 - 初始化所有子系统
 | `main/led.c`                 | LED 呼吸/闪烁模式                  |
 | `main/dns_server.c`          | DNS 服务器用于强制门户重定向       |
 | `res/wifi_*.c`               | 内嵌的音频数据（WiFi 状态提示音）  |
-| `model/litepose_esp32s3_test.espdl` | 量化后的坐姿检测模型（7关键点） |
-| `sdkconfig.defaults`         | 默认配置（PSRAM、摄像头型号）      |
+| `model/litepose_esp32s3.espdl` | 量化后的坐姿检测模型（7关键点） |
+| `model/model_specification.md` | 模型规格详细文档 |
+| `sdkconfig.defaults`         | 默认配置（PSRAM、摄像头型号、Watchdog） |
 | `ref/esp-dl-master/examples/yolo11_pose` | ESP-DL 官方姿态检测示例 |
 | `ref/how_to_load_test_profile_model.rst` | ESP-DL 模型部署官方文档 |
 
@@ -110,6 +112,12 @@ app_main.c                    # 入口点 - 初始化所有子系统
 - **PSRAM（DIRAM，341KB）**：充裕，约 232KB 可用，用于模型参数和中间结果
 - **模型参数策略**：使用 `param_copy=false` 将参数保留在 Flash，减少 PSRAM 占用
 - **推理必须在 PSRAM 上分配内存**，避免使用 IRAM
+
+### Watchdog 配置
+
+模型推理时间较长（数秒），需要在 menuconfig 中增加超时：
+- 路径：`Component config` → `Task Watchdog` → `Task watchdog timeout (s)`
+- 推荐值：**40 秒**（或修改 `sdkconfig.defaults` 添加 `CONFIG_ESP_TASK_WDT_TIMEOUT_S=40`）
 
 ### LED 状态
 

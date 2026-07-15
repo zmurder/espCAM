@@ -1,29 +1,45 @@
 /**
  * posture_model.cpp
- * 坐姿检测模型 - 正确前处理（与 Python 测试脚本一致）
+ * 坐姿检测模型 - 4 关键点 COCO Pose（pose_model.espdl）
  *
- * 前处理必须与训练时一致：
- * 1. Letterbox resize 到 320x240
- * 2. ImageNet 归一化: (pixel/255 - mean) / std
- *    mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225]
- * 3. 量化到 INT8 (exponent=-6)
+ * 前处理（与训练 dataset.py 对齐，见 model/esp32_deploy）:
+ * 1. center crop（QVGA 320×240 已是 4:3，全图即可）
+ * 2. resize 到 320×240（ImagePreprocessor 按模型 input shape 自动处理）
+ * 3. ImageNet 归一化: mean=[123.675,116.28,103.53] std=[58.395,57.12,57.375]
+ * 4. RGB（rgb_swap=false），HWC→CHW，按 input exponent 量化到 int8
+ *
+ * 后处理:
+ * - 输出 (1,4,120,160) heatmap，4 通道: 左眼/右眼/左肩/右肩
+ * - 每通道 int8 argmax，conf = max_int8 × 2^exponent
+ * - conf < 0.6 过滤；眼距/肩距比值判前倾(NECK)，双肩倾斜角判歪斜(SHOULDER)
  */
 
 #include <string.h>
 #include <math.h>
+#include <array>
 #include "esp_log.h"
 #include "esp_err.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
 #include "dl_image_jpeg.hpp"
 #include "dl_image_preprocessor.hpp"
 #include "dl_model_base.hpp"
 #include "posture_model.h"
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 static const char* TAG = "POSTURE_MODEL";
 
-extern const uint8_t litepose_esp32s3_espdl[] asm("_binary_litepose_esp32s3_espdl_start");
-extern const uint8_t _binary_320240_jpg_start[] asm("_binary_320240_jpg_start");
-extern const uint8_t _binary_320240_jpg_end[] asm("_binary_320240_jpg_end");
+// 模型嵌入 rodata（pose_model_int8_final.espdl）
+extern const uint8_t pose_model_int8_final_espdl[] asm("_binary_pose_model_int8_final_espdl_start");
+
+// 测试图嵌入 rodata（POSTURE_TEST_IMAGE_MODE=1 时用 model/320240.jpg 推理）
+#if POSTURE_TEST_IMAGE_MODE
+extern const uint8_t _binary_3202402_jpg_start[] asm("_binary_3202402_jpg_start");
+extern const uint8_t _binary_3202402_jpg_end[] asm("_binary_3202402_jpg_end");
+#endif
 
 static dl::Model* s_model = NULL;
 static dl::image::ImagePreprocessor* s_preprocessor = NULL;
@@ -31,215 +47,155 @@ static uint32_t s_last_latency_us = 0;
 
 #define MODEL_INPUT_H 240
 #define MODEL_INPUT_W 320
-#define MODEL_INPUT_C 3
 
-#define HEATMAP_H 60
-#define HEATMAP_W 80
-#define KEYPOINT_COUNT 7
+#define HEATMAP_H 120
+#define HEATMAP_W 160
 
-// 模型量化 exponent（从 .info 文件获取）
-#define INPUT_EXPONENT  -6
-#define OUTPUT_EXPONENT -7
+// 训练对齐：ImageNet 归一化（ESP-DL 要求 [0,255] 范围，已 ×255）
+static const std::array<float, 3> IMAGENET_MEAN = {123.675f, 116.28f, 103.53f};
+static const std::array<float, 3> IMAGENET_STD  = {58.395f, 57.12f, 57.375f};
 
-#define POSTURE_RATIO_MIN 0.3f
-#define POSTURE_RATIO_MAX 0.8f
-#define HEATMAP_THRESHOLD 0.05f
+// 坐姿判断阈值
+#define CONF_THRESH          0.6f    // 置信度阈值（cam 实测 conf≥0.6 PCK 97-100%）
+#define SHOULDER_TILT_WARN   10.0f   // 双肩倾斜角告警阈值（度）
+#define EYE_TILT_WARN        25.0f   // 双眼倾斜角告警（缺肩时判头部歪斜），度
+#define EYE_SHOULDER_DY_MIN  0.15f   // 眼肩垂直距离下限（<此值判前倾），归一化坐标
+#define EYE_Y_FORWARD_MAX    0.50f   // 缺肩时眼睛 y 前倾阈值（眼睛过低=前倾）
 
-// Letterbox padding 值
-#define LETTERBOX_PAD 114
-
-/**
- * @brief 反量化 INT8 → float
- */
-static inline float dequantize(int8_t q, int exponent)
-{
-    return dl::dequantize(q, DL_SCALE(exponent));
-}
-
-/**
- * @brief 前处理: JPEG → Letterbox + 简单归一化(/255) + 量化 → NHWC
- *
- * 与官方 yolo11_pose 例子一致:
- * ImagePreprocessor with mean={0,0,0}, std={255,255,255}
- * 即简单 pixel / 255.0f
- */
-static void preprocess(const uint8_t* rgb, int src_w, int src_h, int8_t* output_buf,
-                      int* out_pad_left, int* out_pad_top, float* out_scale)
-{
-    // 计算 letterbox 缩放比例
-    float scale_x = (float)src_w / MODEL_INPUT_W;
-    float scale_y = (float)src_h / MODEL_INPUT_H;
-    float scale = (scale_x < scale_y) ? scale_x : scale_y;
-
-    int scaled_w = (int)(src_w / scale);
-    int scaled_h = (int)(src_h / scale);
-    int pad_left = (MODEL_INPUT_W - scaled_w) / 2;
-    int pad_top = (MODEL_INPUT_H - scaled_h) / 2;
-
-    *out_pad_left = pad_left;
-    *out_pad_top = pad_top;
-    *out_scale = scale;
-
-    ESP_LOGI(TAG, "Preprocess: src=%dx%d, scaled=%dx%d, pad=(%d,%d), scale=%.4f",
-             src_w, src_h, scaled_w, scaled_h, pad_left, pad_top, scale);
-
-    // 清空输出 buffer（填充 letterbox 背景色 114）
-    for (int h = 0; h < MODEL_INPUT_H; h++) {
-        for (int w = 0; w < MODEL_INPUT_W; w++) {
-            for (int c = 0; c < MODEL_INPUT_C; c++) {
-                // 简单归一化: (114 - 0) / 255 = 0.447
-                float normalized = 114.0f / 255.0f;
-                int idx = h * MODEL_INPUT_W * MODEL_INPUT_C + w * MODEL_INPUT_C + c;
-                output_buf[idx] = dl::quantize<int8_t>(normalized, DL_RESCALE(INPUT_EXPONENT));
-            }
-        }
-    }
-
-    // 处理实际图像区域（最近邻缩放 + 简单归一化 /255）
-    for (int y = 0; y < scaled_h; y++) {
-        for (int x = 0; x < scaled_w; x++) {
-            int dst_y = pad_top + y;
-            int dst_x = pad_left + x;
-            if (dst_y >= MODEL_INPUT_H || dst_x >= MODEL_INPUT_W) continue;
-
-            int src_x = (int)(x * scale);
-            int src_y = (int)(y * scale);
-            if (src_x >= src_w) src_x = src_w - 1;
-            if (src_y >= src_h) src_y = src_h - 1;
-
-            int src_idx = src_y * src_w * 3 + src_x * 3;
-
-            for (int c = 0; c < MODEL_INPUT_C; c++) {
-                // 简单归一化: pixel / 255.0f (与官方 yolo11_pose 一致)
-                float pixel = (float)rgb[src_idx + c];
-                float normalized = pixel / 255.0f;
-                int idx = dst_y * MODEL_INPUT_W * MODEL_INPUT_C + dst_x * MODEL_INPUT_C + c;
-                output_buf[idx] = dl::quantize<int8_t>(normalized, DL_RESCALE(INPUT_EXPONENT));
-            }
-        }
-    }
-}
-
-/**
- * @brief 从热力图解析关键点（NHWC 布局）
- */
+// 解析热力图：每关键点 int8 argmax + dequantize conf
 static void parse_heatmaps(const int8_t* quant_heatmaps, int exponent,
-                         posture_keypoint_data_t* keypoints,
-                         int pad_left, int pad_top, float scale,
-                         int orig_w, int orig_h)
+                           posture_keypoint_data_t* keypoints)
 {
-    for (int k = 0; k < KEYPOINT_COUNT; k++) {
-        float max_val = -1e6f;
-        int max_x = 0, max_y = 0;
+    // 输出 layout [1, 120, 160, 4] = (batch, H, W, keypoint)，NHWC
+    // 每像素 4 个关键点通道连续存放：index = (y*W + x)*C + k
+    const float scale = powf(2.0f, (float)exponent);  // 对称量化: float = int8 × 2^exp
 
-        // NHWC: index = (y * W + x) * C + k
+    for (int k = 0; k < KEYPOINT_COUNT; k++) {
+        int8_t maxv = -128;
+        int max_row = 0, max_col = 0;
         for (int y = 0; y < HEATMAP_H; y++) {
             for (int x = 0; x < HEATMAP_W; x++) {
-                int idx = (y * HEATMAP_W + x) * KEYPOINT_COUNT + k;
-                float val = dequantize(quant_heatmaps[idx], exponent);
-                if (val > max_val) {
-                    max_val = val;
-                    max_x = x;
-                    max_y = y;
+                int idx = (y * HEATMAP_W + x) * KEYPOINT_COUNT + k;  // NHWC
+                int8_t v = quant_heatmaps[idx];
+                if (v > maxv) {
+                    maxv = v;
+                    max_row = y;
+                    max_col = x;
                 }
             }
         }
 
-        keypoints[k].score = max_val;
+        // 归一化到 [0,1]（相对 320×240 模型输入；heatmap 160×120 = 输入 1/2，归一化值等价）
+        keypoints[k].x = (float)max_col / (float)HEATMAP_W;
+        keypoints[k].y = (float)max_row / (float)HEATMAP_H;
+        keypoints[k].score = (float)maxv * scale;   // dequantize（Sigmoid 输出，已在 [0,1]）
+        keypoints[k].valid = keypoints[k].score >= CONF_THRESH;
 
-        // 坐标映射: 热力图 → letterbox → 原图 → 归一化
-        // 热力图坐标 (max_x, max_y) 对应 letterbox 坐标系
-        float letterbox_x = (float)max_x * MODEL_INPUT_W / HEATMAP_W;
-        float letterbox_y = (float)max_y * MODEL_INPUT_H / HEATMAP_H;
-
-        float img_x = (letterbox_x - pad_left) / scale;
-        float img_y = (letterbox_y - pad_top) / scale;
-
-        keypoints[k].x = img_x / orig_w;
-        keypoints[k].y = img_y / orig_h;
-
-        ESP_LOGI(TAG, "  kp[%d]: hm=(%d,%d) lb=(%.1f,%.1f) img=(%.1f,%.1f) norm=(%.3f,%.3f) score=%.4f",
-                 k, max_x, max_y, letterbox_x, letterbox_y, img_x, img_y,
-                 keypoints[k].x, keypoints[k].y, max_val);
+        ESP_LOGI(TAG, "  kp[%d]: hm=(%d,%d) norm=(%.3f,%.3f) conf=%.3f",
+                 k, max_col, max_row, keypoints[k].x, keypoints[k].y, keypoints[k].score);
     }
 }
 
-static float calc_distance(posture_keypoint_data_t* p1, posture_keypoint_data_t* p2)
+static inline float dist_norm(float x0, float y0, float x1, float y1)
 {
-    float dx = p1->x - p2->x;
-    float dy = p1->y - p2->y;
+    float dx = x1 - x0;
+    float dy = y1 - y0;
     return sqrtf(dx * dx + dy * dy);
 }
 
-static posture_result_t judge_posture(posture_keypoint_data_t* keypoints, float* out_ratio)
+// 把 atan2 角度归一化到 [-90,90]：面对镜头时连线 dx<0，水平时 atan2 返回 ±180°，
+// 必须映射为 0°，否则"水平"会被误判为大倾斜（曾导致 eye_tilt≈160° 永远超阈）
+static inline float normalize_tilt(float deg)
 {
-    for (int i = 0; i < KEYPOINT_COUNT; i++) {
-        if (keypoints[i].score < HEATMAP_THRESHOLD) {
-            return POSTURE_NOT_DETECTED;
-        }
-    }
+    if (deg > 90.0f)       deg -= 180.0f;
+    else if (deg < -90.0f) deg += 180.0f;
+    return deg;
+}
 
-    float eye_dist = calc_distance(&keypoints[KEYPOINT_LEFT_EYE], &keypoints[KEYPOINT_RIGHT_EYE]);
-    float shoulder_dist = calc_distance(&keypoints[KEYPOINT_LEFT_SHOULDER], &keypoints[KEYPOINT_RIGHT_SHOULDER]);
-
-    if (shoulder_dist < 0.001f) {
+// 姿态判断：双肩可信时用 比值(前倾)+倾斜角(歪斜)；
+// 缺一肩（左肩 espdl 量化峰值偏移、位置不可信）时退化用双眼判断
+static posture_result_t judge_posture(posture_keypoint_data_t* kp,
+                                      float* out_ratio, float* out_shoulder_tilt, float* out_eye_tilt)
+{
+    // 双眼必须可信（最可靠的关键点）
+    if (!kp[KEYPOINT_LEFT_EYE].valid || !kp[KEYPOINT_RIGHT_EYE].valid) {
+        ESP_LOGI(TAG, "eyes not reliable (conf<%.1f), skip", CONF_THRESH);
         return POSTURE_NOT_DETECTED;
     }
 
-    float ratio = eye_dist / shoulder_dist;
-    *out_ratio = ratio;
+    // 双眼连线倾斜角（总能算，反映头部歪斜）+ 眼睛平均 y（前倾时下移）
+    float edx = kp[KEYPOINT_RIGHT_EYE].x - kp[KEYPOINT_LEFT_EYE].x;
+    float edy = kp[KEYPOINT_RIGHT_EYE].y - kp[KEYPOINT_LEFT_EYE].y;
+    *out_eye_tilt = normalize_tilt(atan2f(edy, edx) * 180.0f / (float)M_PI);
+    float eye_y_avg = (kp[KEYPOINT_LEFT_EYE].y + kp[KEYPOINT_RIGHT_EYE].y) * 0.5f;
 
-    ESP_LOGI(TAG, "eye_dist=%.3f, shoulder_dist=%.3f, ratio=%.3f", eye_dist, shoulder_dist, ratio);
+    // 双肩都可信：完整判断（眼肩垂直距离判前倾 + 双肩倾斜判歪斜）
+    if (kp[KEYPOINT_LEFT_SHOULDER].valid && kp[KEYPOINT_RIGHT_SHOULDER].valid) {
+        // 眼肩垂直距离：正常眼睛在肩膀上方(dy>0)，前倾低头时眼睛下移、dy 变小
+        float shoulder_y_avg = (kp[KEYPOINT_LEFT_SHOULDER].y + kp[KEYPOINT_RIGHT_SHOULDER].y) * 0.5f;
+        float eye_shoulder_dy = shoulder_y_avg - eye_y_avg;
 
-    if (ratio < POSTURE_RATIO_MIN || ratio > POSTURE_RATIO_MAX) {
-        return POSTURE_BAD_NECK;
+        // ratio 仅供日志参考（人体比例，不再作前倾判断依据）
+        float eye_dist = dist_norm(kp[KEYPOINT_LEFT_EYE].x, kp[KEYPOINT_LEFT_EYE].y,
+                                   kp[KEYPOINT_RIGHT_EYE].x, kp[KEYPOINT_RIGHT_EYE].y);
+        float shoulder_dist = dist_norm(kp[KEYPOINT_LEFT_SHOULDER].x, kp[KEYPOINT_LEFT_SHOULDER].y,
+                                        kp[KEYPOINT_RIGHT_SHOULDER].x, kp[KEYPOINT_RIGHT_SHOULDER].y);
+        *out_ratio = (shoulder_dist > 0.001f) ? (eye_dist / shoulder_dist) : 0.0f;
+
+        float sdx = kp[KEYPOINT_RIGHT_SHOULDER].x - kp[KEYPOINT_LEFT_SHOULDER].x;
+        float sdy = kp[KEYPOINT_RIGHT_SHOULDER].y - kp[KEYPOINT_LEFT_SHOULDER].y;
+        *out_shoulder_tilt = normalize_tilt(atan2f(sdy, sdx) * 180.0f / (float)M_PI);
+
+        ESP_LOGI(TAG, "[both shoulders] eye_shoulder_dy=%.3f ratio=%.3f shoulder_tilt=%.1f eye_tilt=%.1f",
+                 eye_shoulder_dy, *out_ratio, *out_shoulder_tilt, *out_eye_tilt);
+
+        if (eye_shoulder_dy < EYE_SHOULDER_DY_MIN) return POSTURE_BAD_NECK;              // 前倾
+        if (fabsf(*out_shoulder_tilt) > SHOULDER_TILT_WARN) return POSTURE_BAD_SHOULDER;  // 歪斜
+        return POSTURE_OK;
     }
 
-    // 肩膀不平判定：只有当两个肩膀置信度都足够高时才判定
-    // 避免因 INT8 量化导致低置信度检测错误而误判
-    float left_shoulder_score = keypoints[KEYPOINT_LEFT_SHOULDER].score;
-    float right_shoulder_score = keypoints[KEYPOINT_RIGHT_SHOULDER].score;
-    float shoulder_score_threshold = 0.3f;  // 低于此置信度不判定肩膀问题
+    // 缺一肩（左肩量化失效）：退化用双眼判断
+    ESP_LOGI(TAG, "[single shoulder] L_sh=%.2f R_sh=%.2f -> 用双眼 eye_tilt=%.1f eye_y=%.2f",
+             kp[KEYPOINT_LEFT_SHOULDER].score, kp[KEYPOINT_RIGHT_SHOULDER].score,
+             *out_eye_tilt, eye_y_avg);
 
-    if (left_shoulder_score > shoulder_score_threshold && right_shoulder_score > shoulder_score_threshold) {
-        float shoulder_y_diff = fabsf(keypoints[KEYPOINT_LEFT_SHOULDER].y - keypoints[KEYPOINT_RIGHT_SHOULDER].y);
-        if (shoulder_y_diff > 0.1f) {
-            return POSTURE_BAD_SHOULDER;
-        }
-    }
-
+    if (fabsf(*out_eye_tilt) > EYE_TILT_WARN) return POSTURE_BAD_SHOULDER;  // 头部歪斜
+    if (eye_y_avg > EYE_Y_FORWARD_MAX) return POSTURE_BAD_NECK;             // 低头/前倾
     return POSTURE_OK;
 }
 
 esp_err_t posture_model_init(void)
 {
-    ESP_LOGI(TAG, "Initializing posture model...");
+    ESP_LOGI(TAG, "Initializing posture model (pose_model, 4 keypoints)...");
 
-    s_model = new dl::Model((const char*)litepose_esp32s3_espdl, fbs::MODEL_LOCATION_IN_FLASH_RODATA);
-
+    // 创建模型：param_copy=true 把参数拷到 PSRAM（8MB PSRAM 充裕），
+    // 否则 param_copy=false 每个卷积都要从 flash 读权重，推理会慢到 40s+ 触发 watchdog
+    s_model = new dl::Model((const char*)pose_model_int8_final_espdl,
+                            fbs::MODEL_LOCATION_IN_FLASH_RODATA,
+                            0,                            // max_internal_size
+                            dl::MEMORY_MANAGER_GREEDY,    // mm_type
+                            nullptr,                      // key
+                            true);                        // param_copy=true
     if (s_model == nullptr) {
         ESP_LOGE(TAG, "Failed to create model instance");
         return ESP_FAIL;
     }
 
+    // ImagePreprocessor：ImageNet 归一化 + RGB（rgb_swap=false），不启用 letterbox
+    s_preprocessor = new dl::image::ImagePreprocessor(s_model, IMAGENET_MEAN, IMAGENET_STD, false);
+
     // 打印模型输入信息
     std::map<std::string, dl::TensorBase *> model_inputs = s_model->get_inputs();
     dl::TensorBase *model_input = model_inputs.begin()->second;
-    ESP_LOGI(TAG, "Model input: shape=[%d,%d,%d,%d], exponent=%d, dtype=%d",
+    ESP_LOGI(TAG, "Model input: shape=[%d,%d,%d,%d], exponent=%d",
              model_input->shape[0], model_input->shape[1], model_input->shape[2], model_input->shape[3],
-             (int)model_input->exponent, (int)model_input->dtype);
+             (int)model_input->exponent);
+
+    ESP_LOGI(TAG, "Free heap: %lu bytes, Free PSRAM: %lu bytes",
+             (unsigned long)heap_caps_get_free_size(MALLOC_CAP_DEFAULT),
+             (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
     ESP_LOGI(TAG, "Model initialized successfully");
-
-#if POSTURE_TEST_MODE
-    esp_err_t ret = s_model->test();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Model test FAILED!");
-    } else {
-        ESP_LOGI(TAG, "Model test PASSED!");
-    }
-#endif
-
     return ESP_OK;
 }
 
@@ -253,27 +209,24 @@ esp_err_t posture_model_run_inference(camera_fb_t* fb, posture_output_t* output)
 
     uint64_t start_time = esp_timer_get_time();
 
-    // 图像数据指针和大小
-    void* img_data = NULL;
-    size_t img_len = 0;
-
+    // 图像来源：测试图模式用嵌入的 320240.jpg，否则用摄像头帧
+    const void* img_data;
+    size_t img_len;
 #if POSTURE_TEST_IMAGE_MODE
-    // 静态图像测试模式：使用嵌入的测试图像
-    img_data = (void*)_binary_320240_jpg_start;
-    img_len = (size_t)(_binary_320240_jpg_end - _binary_320240_jpg_start);
-    ESP_LOGI(TAG, "Using TEST IMAGE, size: %d bytes", img_len);
+    img_data = (const void*)_binary_3202402_jpg_start;
+    img_len = (size_t)(_binary_3202402_jpg_end - _binary_3202402_jpg_start);
+    ESP_LOGI(TAG, "Using TEST IMAGE, %d bytes", (int)img_len);
 #else
-    // 相机模式
     if (fb == NULL) {
         return ESP_FAIL;
     }
-    img_data = (void*)fb->buf;
+    img_data = (const void*)fb->buf;
     img_len = fb->len;
 #endif
 
-    // 1. JPEG 解码
+    // JPEG 解码为 RGB888
     dl::image::jpeg_img_t jpeg_img;
-    jpeg_img.data = img_data;
+    jpeg_img.data = (void*)img_data;
     jpeg_img.data_len = img_len;
 
     auto img = dl::image::sw_decode_jpeg(jpeg_img, dl::image::DL_IMAGE_PIX_TYPE_RGB888);
@@ -281,36 +234,15 @@ esp_err_t posture_model_run_inference(camera_fb_t* fb, posture_output_t* output)
         ESP_LOGE(TAG, "JPEG decode failed");
         return ESP_FAIL;
     }
-
     ESP_LOGI(TAG, "Image decoded: %dx%d", img.width, img.height);
 
-    // 2. 前处理: Letterbox + ImageNet归一化 + 量化
-    // 注意：输入缓冲区必须分配在 PSRAM，避免占用紧张的 DRAM
-    int pad_left, pad_top;
-    float scale;
-    int8_t* input_buf = (int8_t*)heap_caps_malloc(1 * MODEL_INPUT_H * MODEL_INPUT_W * MODEL_INPUT_C, MALLOC_CAP_SPIRAM);
-    if (input_buf == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate input buffer in PSRAM");
-        heap_caps_free(img.data);
-        return ESP_FAIL;
-    }
-    preprocess((uint8_t*)img.data, img.width, img.height, input_buf, &pad_left, &pad_top, &scale);
+    // 前处理: center crop(空=全图) + resize + ImageNet 归一化 + HWC→CHW + 量化
+    s_preprocessor->preprocess(img);
 
-    // 3. 获取模型输入 tensor 并填充数据
-    std::map<std::string, dl::TensorBase *> model_inputs = s_model->get_inputs();
-    dl::TensorBase *model_input = model_inputs.begin()->second;
-
-    ESP_LOGI(TAG, "Model input buffer: shape=[%d,%d,%d,%d], exponent=%d",
-             model_input->shape[0], model_input->shape[1], model_input->shape[2], model_input->shape[3],
-             (int)model_input->exponent);
-
-    // 复制数据到模型输入 memory
-    memcpy(model_input->data, input_buf, 1 * MODEL_INPUT_H * MODEL_INPUT_W * MODEL_INPUT_C);
-
-    // 4. 运行推理
+    // 模型推理（单核：实测双核对 YOLO 串行模型无效——断 wifi 验证仍 ~10s）
     s_model->run();
 
-    // 5. 获取输出
+    // 获取输出 heatmap (1,4,120,160)
     std::map<std::string, dl::TensorBase *> model_outputs = s_model->get_outputs();
     dl::TensorBase *model_output = model_outputs.begin()->second;
 
@@ -321,26 +253,12 @@ esp_err_t posture_model_run_inference(camera_fb_t* fb, posture_output_t* output)
     ESP_LOGI(TAG, "Model output: shape=[%d,%d,%d,%d], exponent=%d",
              output_shape[0], output_shape[1], output_shape[2], output_shape[3], output_exp);
 
-    // 打印每个关键点热力图最大值
-    ESP_LOGI(TAG, "Keypoint max heatmap values:");
-    for (int k = 0; k < KEYPOINT_COUNT; k++) {
-        float max_val = -1e6f;
-        for (int y = 0; y < HEATMAP_H; y++) {
-            for (int x = 0; x < HEATMAP_W; x++) {
-                int idx = (y * HEATMAP_W + x) * KEYPOINT_COUNT + k;
-                float val = dequantize(quant_heatmaps[idx], output_exp);
-                if (val > max_val) max_val = val;
-            }
-        }
-        ESP_LOGI(TAG, "  keypoint[%d] max=%.4f", k, max_val);
-    }
+    // 解析热力图 → 4 关键点
+    parse_heatmaps(quant_heatmaps, output_exp, output->keypoints);
 
-    // 6. 解析热力图
-    parse_heatmaps(quant_heatmaps, output_exp, output->keypoints,
-                   pad_left, pad_top, scale, img.width, img.height);
-
-    // 7. 姿态判断
-    output->result = judge_posture(output->keypoints, &output->ratio);
+    // 姿态判断
+    output->result = judge_posture(output->keypoints, &output->ratio,
+                                   &output->shoulder_tilt_deg, &output->eye_tilt_deg);
 
     uint64_t end_time = esp_timer_get_time();
     s_last_latency_us = (uint32_t)(end_time - start_time);
@@ -348,20 +266,18 @@ esp_err_t posture_model_run_inference(camera_fb_t* fb, posture_output_t* output)
     ESP_LOGI(TAG, "Inference done in %lu us, result=%d", (unsigned long)s_last_latency_us, output->result);
 
     heap_caps_free(img.data);
-    heap_caps_free(input_buf);
-
     return ESP_OK;
 }
 
 void posture_model_deinit(void)
 {
-    if (s_model != nullptr) {
-        delete s_model;
-        s_model = nullptr;
-    }
     if (s_preprocessor != nullptr) {
         delete s_preprocessor;
         s_preprocessor = nullptr;
+    }
+    if (s_model != nullptr) {
+        delete s_model;
+        s_model = nullptr;
     }
     ESP_LOGI(TAG, "Model deinitialized");
 }
