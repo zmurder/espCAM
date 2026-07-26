@@ -9,7 +9,7 @@
 ESP32-S3 WiFi 相机应用，集成了**坐姿检测模型推理**。运行于 ESP32-S3-EYE 开发板，支持摄像头采集、I2S 音频播放（MAX98357 DAC）和双模式 WiFi（SoftAP + Station）。
 
 核心功能流程：
-摄像头采集图像 → 模型推理（7关键点检测）→ 姿态判断（眼睛-肩膀距离比）→ 音频提示音播放
+摄像头采集图像 → 模型推理（6关键点检测：双眼/双耳/双肩）→ 姿态判断（双肩倾斜 + 眼肩前倾比）→ 音频提示音播放
 
 ## 构建命令
 
@@ -59,27 +59,38 @@ app_main.c                    # 入口点 - 初始化所有子系统
 
 ### 坐姿检测模型
 
-**模型文件：** `model/litepose_esp32s3.espdl`
+**模型文件：** `model/pose_model_6kp.espdl`（约 522KB，6 关键点）
 
-**模型规格（详见 `model/model_specification.md`）：**
+**模型规格（部署/改动指南详见 `model/esp32_deploy/model_deploy_update.md`）：**
 
 | 属性 | 值 |
 | :--- | :--- |
-| 参数量 | 96,648 |
-| 模型大小 | 144KB |
-| 量化方式 | PTQ 8bit |
-| 输入形状 | [1, 3, 240, 320] (CHW) |
-| 输出形状 | [1, 7, 60, 80] |
+| 关键点数 | 6（双眼 / 双耳 / 双肩） |
+| 参数量 | ~0.13M |
+| 量化方式 | PTQ int8（对称量化，POWER_OF_2 exponent） |
+| 输入形状 | [1, 240, 320, 3] (NHWC, RGB) |
+| 输入 exponent | -7 |
+| 输出形状 | [1, 120, 160, 6] heatmap + Sigmoid |
 
-**前处理（使用 ImagePreprocessor）：**
-- Letterbox resize：保持宽高比，padding {114,114,114} 居中
-- 归一化：pixel / 255.0f（简单 /255，不是 ImageNet）
-- HWC→CHW 转换（自动处理）
-- 量化：exponent=-7
+**6 个关键点顺序：** 0=左眼, 1=右眼, 2=左耳, 3=右耳, 4=左肩, 5=右肩
 
-**7 个关键点顺序：** 0=左眼, 1=右眼, 2=左耳, 3=右耳, 4=鼻子, 5=左肩, 6=右肩
+**前处理（`dl::image::ImagePreprocessor`，与训练侧对齐）：**
+- center crop：QVGA 320×240 已是 4:3，直接全图输入
+- resize 到 240×320（ImagePreprocessor 按模型 input shape 自动处理）
+- ImageNet 归一化：mean=[123.675, 116.28, 103.53]，std=[58.395, 57.12, 57.375]
+- RGB（`rgb_swap=false`），HWC→CHW，按 input exponent 量化到 int8
 
-**姿态判断逻辑：** 计算眼睛连线与肩膀连线的距离比值，判断是否偏离正常范围（0.25~0.65），超阈值时播放提示音。
+**后处理（`main/posture_model.cpp`）：**
+- heatmap 每通道 int8 argmax，`conf = max_int8 × 2^exponent`（Sigmoid 输出，已在 [0,1]）
+- 输出 layout 按 `output_shape` 自适应（NHWC/NCHW 均支持，启动日志会打印 `chan_dim`）
+- `conf < 0.6` 视为不可信
+
+**姿态判断逻辑：**
+- 可信判据：双肩均可见 && 可见关键点 ≥ 3，否则 `POSTURE_NOT_DETECTED`
+- `POSTURE_BAD_SHOULDER`（歪斜）：双肩连线倾斜角绝对值 > 10°
+- `POSTURE_BAD_NECK`（前倾）：眼肩垂直距离 / 肩宽 < 0.5（仅双眼可见时判断）
+- 头部定位：双眼优先，低头看不到眼时用双耳兜底（仅用于日志，不参与判废）
+- 不良姿态触发 `audio_player_play_posture_alert()` 播放 `res/bad_pose.mp3` 提示音
 
 ### 主要文件
 
@@ -93,11 +104,12 @@ app_main.c                    # 入口点 - 初始化所有子系统
 | `main/wifi_config_manager.c` | 强制门户，NVS 凭据存储             |
 | `main/udp_camera_client.c`   | UDP 图像/音频发送和接收任务        |
 | `main/audio_player.c`        | I2S 播放（状态提示音和音频流）     |
+| `main/bad_pose.h`            | 坐姿不良提示音数据（由 `res/bad_pose.mp3` 转换） |
 | `main/led.c`                 | LED 呼吸/闪烁模式                  |
 | `main/dns_server.c`          | DNS 服务器用于强制门户重定向       |
 | `res/wifi_*.c`               | 内嵌的音频数据（WiFi 状态提示音）  |
-| `model/litepose_esp32s3.espdl` | 量化后的坐姿检测模型（7关键点） |
-| `model/model_specification.md` | 模型规格详细文档 |
+| `model/pose_model_6kp.espdl` | 量化后的坐姿检测模型（6 关键点：双眼/双耳/双肩） |
+| `model/esp32_deploy/`        | ESP-DL 部署参考代码 + 模型接口变更改动指南（`model_deploy_update.md`） |
 | `sdkconfig.defaults`         | 默认配置（PSRAM、摄像头型号、Watchdog） |
 | `ref/esp-dl-master/examples/yolo11_pose` | ESP-DL 官方姿态检测示例 |
 | `ref/how_to_load_test_profile_model.rst` | ESP-DL 模型部署官方文档 |
@@ -110,12 +122,12 @@ app_main.c                    # 入口点 - 初始化所有子系统
 
 - **IRAM（TCM，16KB）**：极度紧张，99.99% 已用，几乎无法添加新 IRAM 代码
 - **PSRAM（DIRAM，341KB）**：充裕，约 232KB 可用，用于模型参数和中间结果
-- **模型参数策略**：使用 `param_copy=false` 将参数保留在 Flash，减少 PSRAM 占用
+- **模型参数策略**：使用 `param_copy=true` 把参数拷到 PSRAM（8MB PSRAM 充裕）；`false` 时每个卷积都要从 flash 读权重，推理会慢到 40s+ 触发 watchdog
 - **推理必须在 PSRAM 上分配内存**，避免使用 IRAM
 
 ### Watchdog 配置
 
-模型推理时间较长（数秒），需要在 menuconfig 中增加超时：
+模型推理历史耗时较长（旧 4 点模型 ~10 秒），需在 menuconfig 中增加超时；新 6 点模型（ReLU + nearest 上采样）预期 150–300ms，40s 上限仍有充足余量：
 - 路径：`Component config` → `Task Watchdog` → `Task watchdog timeout (s)`
 - 推荐值：**40 秒**（或修改 `sdkconfig.defaults` 添加 `CONFIG_ESP_TASK_WDT_TIMEOUT_S=40`）
 

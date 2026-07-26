@@ -15,6 +15,7 @@
 #include "wifi_connect.h"
 #include "wifi_beak.h"
 #include "wifi_reset.h"
+#include "bad_pose.h"   // 坐姿不良提示音（res/bad_pose.mp3 转换而来）
 
 static const char* TAG = "AUDIO_PLAYER";
 
@@ -230,7 +231,7 @@ esp_err_t audio_player_play_stream(uint8_t* audio_data, size_t data_size)
     }
 
     // 播放完成后停止并发送静音
-    audio_player_stop(data_size);
+    audio_player_stop();
 
     return ESP_OK;
 }
@@ -279,10 +280,6 @@ esp_err_t audio_player_play_posture_alert(posture_result_t posture_result)
         return ESP_ERR_INVALID_STATE;
     }
 
-    // TODO: 替换为实际的坐姿提示音文件
-    // 需要用户提供坐姿提示音文件，放在 res/ 目录下
-    // 目前使用 wifi_beak_audio 作为占位提示音
-
     ESP_LOGI(TAG, "Playing posture alert for result: %d", posture_result);
-    return audio_player_play_stream((uint8_t*)wifi_beak_audio, WIFI_BEAK_AUDIO_LEN);
+    return audio_player_play_stream((uint8_t*)bad_pose_audio, BAD_POSE_AUDIO_LEN);
 }

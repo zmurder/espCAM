@@ -1,5 +1,6 @@
-# 模型文件嵌入到 rodata - 使用新量化模型 pose_model_int8_final（4 关键点 COCO Pose）
-set(MODEL_FILE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../model/pose_model_int8_final.espdl")
+# 模型文件嵌入到 rodata - 使用 6 关键点模型 pose_model_6kp_v2（双眼/双耳/双肩）
+# symbol 名：pose_model_6kp_v2.espdl → _binary_pose_model_6kp_v2_espdl_start
+set(MODEL_FILE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../model/pose_model_6kp_v2.espdl")
 
 # 测试用静态图片（POSTURE_TEST_IMAGE_MODE=1 时推理此图，验证 ESP 处理）
 set(TEST_IMAGE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../model/3202402.jpg")

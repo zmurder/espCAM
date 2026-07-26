@@ -3,11 +3,11 @@
  * ============================
  * 摄像头(OV3660, 320×240) → 模型推理 → heatmap 后处理 → 坐姿判断
  *
- * 模型: pose_model.espdl (1.2M, int8, ESP32-S3)
+ * 模型: pose_model.espdl (~150KB, int8, ESP32-S3, 重构版 ~0.39G MACs)
  *   输入 (1,3,240,320) RGB + ImageNet 归一化
- *   输出 (1,4,120,160) heatmap，4 通道: 左眼/右眼/左肩/右肩
+ *   输出 (1,6,120,160) heatmap，6 通道: 左眼/右眼/左耳/右耳/左肩/右肩
  *
- * 坐姿判断: 双肩连线倾斜角 >10° 判为歪斜; conf<0.6 的点过滤(难检样本)
+ * 坐姿判断: 双肩连线倾斜角 >10° 判为歪斜; 低头看不到眼时用双耳定位头部
  */
 #include "pose_inference.h"
 #include "pose_postprocess.h"
@@ -106,9 +106,11 @@ extern "C" void app_main()
             ESP_LOGW(TAG, ">> 坐姿歪斜! 双肩倾斜 %.1f° (阈值%.0f°) 肩宽%.0fpx",
                      r.shoulder_tilt_deg, pose::TILT_WARN_DEG, r.shoulder_width_px);
         } else {
-            ESP_LOGI(TAG, "坐姿正常 肩倾%.1f° 眼倾%.1f° 肩宽%.0fpx 眼距%.0fpx",
-                     r.shoulder_tilt_deg, r.eye_tilt_deg,
-                     r.shoulder_width_px, r.eye_dist_px);
+            const char* head_src = r.head_source == 0 ? "眼" :
+                                   r.head_source == 1 ? "耳" : "无";
+            ESP_LOGI(TAG, "坐姿正常 肩倾%.1f° 头倾%.1f°(来自%s) 肩宽%.0fpx 头距%.0fpx",
+                     r.shoulder_tilt_deg, r.head_tilt_deg, head_src,
+                     r.shoulder_width_px, r.head_dist_px);
         }
 
         esp_camera_fb_return(fb);

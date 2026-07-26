@@ -1,17 +1,19 @@
 # ESP32-S3 坐姿检测 — 部署工程
 
-把训练好的姿态模型（`pose_model.espdl`）部署到 ESP32-S3，从 OV3660 摄像头实时采集 320×240 图像，推理输出双眼+双肩 4 关键点，判断坐姿（倾斜度/距离）。
+把训练好的姿态模型（`pose_model.espdl`）部署到 ESP32-S3，从 OV3660 摄像头实时采集 320×240 图像，推理输出 **6 关键点（双眼/双耳/双肩）**，判断坐姿（倾斜度/距离；低头看不到眼时用双耳定位头部）。
+
+> **模型从 4 点升级到 6 点（含双耳）+ 结构重构（0.84M→0.13M，推理 10s→预期 150-300ms）**，部署代码改动详见 [`model_deploy_update.md`](model_deploy_update.md)。
 
 ## 模型信息
 
 | 项 | 值 |
 |---|---|
-| 文件 | `pose_model.espdl` (1.2M) + `pose_model.info` |
+| 文件 | `pose_model.espdl` (~150KB) + `pose_model.info` |
 | 量化 | int8 对称（ESP-PPQ, target=esp32s3） |
 | 输入 | `(1,3,240,320)` RGB + ImageNet 归一化 |
-| 输出 | `(1,4,120,160)` heatmap（左眼/右眼/左肩/右肩） |
-| 参数量 | 0.84M |
-| 精度 | cam 实拍 PCK@0.1 = 95.06%（量化后），conf≥0.6 时 97–100% |
+| 输出 | `(1,6,120,160)` heatmap（左眼/右眼/左耳/右耳/左肩/右肩） + Sigmoid |
+| 参数量 | 0.13M（重构版，上采样用 Resize 无 ConvTranspose，激活 ReLU） |
+| 精度 | cam 实拍 PCK@0.1 = 96.50%（量化后，损失 1.15%）；眼/耳近满分、肩膀 ~0.93 |
 
 ## 目录结构
 
@@ -87,11 +89,11 @@ idf.py -p /dev/ttyUSB0 flash monitor
 2. **conf**：`max_int8 × 2^exponent` dequantize → Sigmoid 输出 [0,1]
 3. **conf 阈值 0.6**：<0.6 标记 `valid=false`
    - 实测：conf≥0.6 时眼睛 PCK 100%、肩膀 97–99.7%；conf<0.6 的 13% 肩膀是难检样本（侧身/遮挡/边缘），argmax 会跑偏，必须过滤
-4. **坐姿指标**：
-   - `shoulder_tilt_deg`：双肩连线倾斜角（双肩水平=0°）
-   - `eye_tilt_deg`：双眼连线倾斜角
-   - `shoulder_width_px` / `eye_dist_px`：像素距离
-5. **坐姿判断**：`reliable`(≥3 点 valid) 且 `|shoulder_tilt_deg|>10°` → 判歪斜
+4. **坐姿指标**（6 点，索引 0/1眼、2/3耳、4/5肩）：
+   - `shoulder_tilt_deg`：双肩连线倾斜角（idx 4/5，双肩水平=0°）
+   - `head_tilt_deg`：头部连线倾斜角——**眼(0/1)优先，眼不可见(低头)则用耳(2/3)兜底**，`head_source` 标记来自眼还是耳
+   - `shoulder_width_px` / `head_dist_px`：像素距离
+5. **坐姿判断**：`reliable`(双肩可见 且 ≥3 点 valid) 且 `|shoulder_tilt_deg|>10°` → 判歪斜
 
 ## 调参
 
@@ -120,7 +122,8 @@ idf.py -p /dev/ttyUSB0 flash monitor
 
 烧录后串口应输出类似：
 ```
-I (xxxx) pose: 坐姿正常 肩倾1.5° 眼倾0.8° 肩宽95px 眼距48px
+I (xxxx) pose: 坐姿正常 肩倾1.5° 头倾0.8°(来自眼) 肩宽95px 头距48px
+I (xxxx) pose: 坐姿正常 肩倾1.2° 头倾0.5°(来自耳) 肩宽92px 头距40px   ← 低头时用耳
 W (xxxx) pose: >> 坐姿歪斜! 双肩倾斜 13.2° (阈值10°) 肩宽90px
 ```
 

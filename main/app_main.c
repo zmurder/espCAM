@@ -36,8 +36,8 @@ static const char* TAG = "APP_MAIN";
 #define WIFI_CONFIG_BUTTON_GPIO 14
 
 // UDP 输出开关：每推理一帧，发一帧图像(8080) + 一帧检测结果(8082)
-#define SEND_IMAGE_VIA_UDP   1   // 1=发送推理帧 JPEG 到 8080
-#define SEND_RESULT_VIA_UDP  1   // 1=发送检测结果(关键点)到 8082
+#define SEND_IMAGE_VIA_UDP 1   // 1=发送推理帧 JPEG 到 8080
+#define SEND_RESULT_VIA_UDP 1  // 1=发送检测结果(关键点)到 8082
 
 static void audio_player_init_task(void* arg)
 {
@@ -109,13 +109,13 @@ static void posture_inference_task(void* arg)
                 ESP_LOGW(TAG, "Posture: Keypoints not detected");
             }
 
-            // UDP 输出：先结果(8082)后图像(8080)，PC 收到图像时结果已到，可直接叠加
-            #if SEND_RESULT_VIA_UDP
+// UDP 输出：先结果(8082)后图像(8080)，PC 收到图像时结果已到，可直接叠加
+#if SEND_RESULT_VIA_UDP
             send_posture_result_via_udp(&output);
-            #endif
-            #if SEND_IMAGE_VIA_UDP
-            send_image_via_udp(fb);   // 推理一张发一张（fb 须在下方 return 前使用）
-            #endif
+#endif
+#if SEND_IMAGE_VIA_UDP
+            send_image_via_udp(fb);  // 推理一张发一张（fb 须在下方 return 前使用）
+#endif
 
             ESP_LOGI(TAG, "Inference latency: %lu us", (unsigned long)posture_model_get_last_latency_us());
         }
