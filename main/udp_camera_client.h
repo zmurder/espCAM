@@ -11,6 +11,11 @@
 esp_err_t send_image_via_udp(camera_fb_t* fb);
 
 /**
+ * @brief 启动 UDP 自动发现监听（PC 广播发现包 → 自动学习/更新目标 IP，幂等）
+ */
+void udp_discovery_start(void);
+
+/**
  * @brief 启动UDP图像传输
  */
 void start_udp_camera(void);

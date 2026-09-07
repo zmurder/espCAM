@@ -16,8 +16,14 @@
 static const char* TAG = "UDP_CAMERA";
 
 // 目标PC的IP地址和端口
-#define UDP_SERVER_IP "192.168.31.126"
-#define UDP_SERVER_PORT 8080
+#define UDP_SERVER_IP "192.168.31.126"  // 编译期默认值；运行时会被自动发现机制覆盖
+#define UDP_SERVER_PORT 20000
+
+// UDP 自动发现（PC IP 变化免改代码）：PC 周期广播发现包到 20003，
+// ESP32 学习其源 IP 作为发送目标并回 ACK；IP 变化后下一个广播周期(2s)内自动跟随
+#define UDP_DISCOVERY_PORT 20003
+#define DISCOVERY_REQ "ESPCAM_DISCOVER"
+#define DISCOVERY_ACK "ESPCAM_ACK"
 
 // UDP相关参数
 #define MAX_UDP_PACKET_SIZE 1400  // MTU限制
@@ -41,6 +47,30 @@ static int s_udp_socket = -1;
 static struct sockaddr_in s_dest_addr;
 static struct sockaddr_in s_posture_dest_addr;  // 姿态结果目标地址
 static bool s_socket_initialized = false;
+
+// 运行时目标 IP（网络序；0=未学习，用编译期默认）。32 位对齐写天然原子无需加锁；
+// 极端竞态（与 init 同时写）最坏丢一次更新，下个广播周期即恢复
+static in_addr_t s_server_ip = 0;
+
+// 更新发送目标 IP（发现任务调用；无变化时静默）
+static void set_server_ip(in_addr_t ip)
+{
+    if (ip == 0 || ip == s_server_ip) {
+        return;
+    }
+    struct in_addr new_addr;
+    new_addr.s_addr = ip;
+    if (s_server_ip != 0) {
+        struct in_addr old_addr;
+        old_addr.s_addr = s_server_ip;
+        ESP_LOGW(TAG, "UDP 目标 IP 更新: %s -> %s", inet_ntoa(old_addr), inet_ntoa(new_addr));
+    } else {
+        ESP_LOGI(TAG, "UDP 目标 IP 由发现机制设定: %s", inet_ntoa(new_addr));
+    }
+    s_server_ip = ip;
+    s_dest_addr.sin_addr.s_addr = ip;
+    s_posture_dest_addr.sin_addr.s_addr = ip;
+}
 
 // 任务控制标志
 static TaskHandle_t s_udp_task_handle = NULL;
@@ -67,20 +97,26 @@ static esp_err_t init_udp_socket_once(void)
     timeout.tv_usec = 0;
     setsockopt(s_udp_socket, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 
-    // 设置目标地址
+    // 设置目标地址（端口固定；IP 优先用发现机制学到的，未学习时用编译期默认）
     memset(&s_dest_addr, 0, sizeof(struct sockaddr_in));
     s_dest_addr.sin_family = AF_INET;
     s_dest_addr.sin_port = htons(UDP_SERVER_PORT);
-    inet_aton(UDP_SERVER_IP, &s_dest_addr.sin_addr);
 
     // 设置姿态结果目标地址（同一IP，不同端口）
     memset(&s_posture_dest_addr, 0, sizeof(struct sockaddr_in));
     s_posture_dest_addr.sin_family = AF_INET;
-    s_posture_dest_addr.sin_port = htons(8082);  // 姿态结果端口
-    inet_aton(UDP_SERVER_IP, &s_posture_dest_addr.sin_addr);
+    s_posture_dest_addr.sin_port = htons(20002);  // 姿态结果端口
+
+    if (s_server_ip != 0) {
+        s_dest_addr.sin_addr.s_addr = s_server_ip;
+        s_posture_dest_addr.sin_addr.s_addr = s_server_ip;
+    } else {
+        inet_aton(UDP_SERVER_IP, &s_dest_addr.sin_addr);
+        inet_aton(UDP_SERVER_IP, &s_posture_dest_addr.sin_addr);
+    }
 
     s_socket_initialized = true;
-    ESP_LOGI(TAG, "UDP socket初始化成功，目标地址: %s:%d", UDP_SERVER_IP, UDP_SERVER_PORT);
+    ESP_LOGI(TAG, "UDP socket初始化成功，目标地址: %s:%d", inet_ntoa(s_dest_addr.sin_addr), UDP_SERVER_PORT);
 
     return ESP_OK;
 }
@@ -312,4 +348,61 @@ void send_posture_result_via_udp(const posture_output_t* output)
     } else {
         ESP_LOGI(TAG, "发送姿态结果: result=%d, ratio=%.3f", output->result, output->ratio);
     }
+}
+
+/**
+ * @brief UDP 自动发现监听任务：PC 端周期广播 DISCOVERY_REQ 到 20003，
+ *        学习其源 IP 为图像/结果发送目标（变化时自动切换），并回复 ACK 供 PC 确认
+ */
+static void udp_discovery_task(void* pvParameters)
+{
+    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock < 0) {
+        ESP_LOGE(TAG, "发现 socket 创建失败: errno %d", errno);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    struct sockaddr_in bind_addr;
+    memset(&bind_addr, 0, sizeof(bind_addr));
+    bind_addr.sin_family = AF_INET;
+    bind_addr.sin_addr.s_addr = htonl(INADDR_ANY);  // 任意接口（STA/AP 均可收到广播）
+    bind_addr.sin_port = htons(UDP_DISCOVERY_PORT);
+    if (bind(sock, (struct sockaddr*)&bind_addr, sizeof(bind_addr)) < 0) {
+        ESP_LOGE(TAG, "发现端口 %d 绑定失败: errno %d", UDP_DISCOVERY_PORT, errno);
+        close(sock);
+        vTaskDelete(NULL);
+        return;
+    }
+    ESP_LOGI(TAG, "UDP 发现监听已启动 :%d（等待 PC 广播，自动学习目标 IP）", UDP_DISCOVERY_PORT);
+
+    char rx[32];
+    while (1) {
+        struct sockaddr_in src;
+        socklen_t src_len = sizeof(src);
+        ssize_t n = recvfrom(sock, rx, sizeof(rx) - 1, 0, (struct sockaddr*)&src, &src_len);
+        if (n <= 0) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+        rx[n] = '\0';
+        if (strcmp(rx, DISCOVERY_REQ) == 0) {
+            set_server_ip(src.sin_addr.s_addr);  // 学习 PC 的 IP（已相同则静默）
+            sendto(sock, DISCOVERY_ACK, strlen(DISCOVERY_ACK), 0,
+                   (struct sockaddr*)&src, sizeof(src));
+        }
+    }
+}
+
+/**
+ * @brief 启动 UDP 自动发现监听（幂等，重复调用无副作用）
+ */
+void udp_discovery_start(void)
+{
+    static bool started = false;
+    if (started) {
+        return;
+    }
+    started = true;
+    xTaskCreate(udp_discovery_task, "udp_discovery", 4096, NULL, 4, NULL);
 }

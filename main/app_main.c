@@ -35,9 +35,14 @@ static const char* TAG = "APP_MAIN";
 
 #define WIFI_CONFIG_BUTTON_GPIO 14
 
-// UDP 输出开关：每推理一帧，发一帧图像(8080) + 一帧检测结果(8082)
-#define SEND_IMAGE_VIA_UDP 1   // 1=发送推理帧 JPEG 到 8080
-#define SEND_RESULT_VIA_UDP 1  // 1=发送检测结果(关键点)到 8082
+// UDP 输出开关：每推理一帧，发一帧图像(20000) + 一帧检测结果(20002)
+#define SEND_IMAGE_VIA_UDP 1   // 1=发送推理帧 JPEG 到 20000
+#define SEND_RESULT_VIA_UDP 1  // 1=发送检测结果(关键点)到 20002
+
+// 坐姿不良语音提示确认次数：连续 N 帧不良才播提示音（中间出现任何非不良帧即重新计数；
+// 触发一次后持续不良期间不重播，恢复正常坐姿后才会再次触发）。
+// 仅影响音频提示，UDP 发送的逐帧 result 不受影响
+#define POSTURE_ALERT_CONSECUTIVE 2
 
 static void audio_player_init_task(void* arg)
 {
@@ -94,22 +99,43 @@ static void posture_inference_task(void* arg)
         ret = posture_model_run_inference(fb, &output);
 
         if (ret == ESP_OK) {
-            if (output.result == POSTURE_OK) {
-                ESP_LOGI(TAG, "Posture: OK (ratio=%.3f)", output.ratio);
+            // 连续不良确认：POSTURE_ALERT_CONSECUTIVE 宏控制连续多少帧不良才播提示音
+            static uint32_t s_bad_streak = 0;    // 连续不良帧计数（非不良帧清零）
+            static bool s_alert_played = false;  // 本轮连续不良是否已播过提示（恢复后复位，防止重播轰炸）
+
+            if (output.result == POSTURE_BAD_NECK || output.result == POSTURE_BAD_SHOULDER) {
+                const char* bad_name = (output.result == POSTURE_BAD_NECK) ? "BAD_NECK" : "BAD_SHOULDER";
+                s_bad_streak++;
+                if (!s_alert_played && s_bad_streak >= POSTURE_ALERT_CONSECUTIVE) {
+                    ESP_LOGE(TAG, "Posture: %s (ratio=%.3f) streak=%lu/%d -> play alert", bad_name, output.ratio, (unsigned long)s_bad_streak, POSTURE_ALERT_CONSECUTIVE);
+                    audio_player_play_posture_alert(output.result);
+                    s_alert_played = true;
+                }
+                else {
+                    ESP_LOGW(TAG,
+                             "Posture: %s (ratio=%.3f) streak=%lu/%d%s",
+                             bad_name,
+                             output.ratio,
+                             (unsigned long)s_bad_streak,
+                             POSTURE_ALERT_CONSECUTIVE,
+                             s_alert_played ? " (alerted)" : " (no alert yet)");
+                }
             }
-            else if (output.result == POSTURE_BAD_NECK) {
-                ESP_LOGE(TAG, "Posture: BAD_NECK (ratio=%.3f)", output.ratio);
-                audio_player_play_posture_alert(POSTURE_BAD_NECK);
-            }
-            else if (output.result == POSTURE_BAD_SHOULDER) {
-                ESP_LOGE(TAG, "Posture: BAD - shoulder issue");
-                audio_player_play_posture_alert(POSTURE_BAD_SHOULDER);
-            }
-            else if (output.result == POSTURE_NOT_DETECTED) {
-                ESP_LOGW(TAG, "Posture: Keypoints not detected");
+            else {
+                s_bad_streak = 0;  // 连续被打断（OK/漏检/不可信），重新计数
+                s_alert_played = false;
+                if (output.result == POSTURE_OK) {
+                    ESP_LOGI(TAG, "Posture: OK (ratio=%.3f)", output.ratio);
+                }
+                else if (output.result == POSTURE_NOT_DETECTED) {
+                    ESP_LOGW(TAG, "Posture: Keypoints not detected");
+                }
+                else if (output.result == POSTURE_UNRELIABLE) {
+                    ESP_LOGW(TAG, "Posture: unreliable keypoints (implausible geometry), skip");
+                }
             }
 
-// UDP 输出：先结果(8082)后图像(8080)，PC 收到图像时结果已到，可直接叠加
+// UDP 输出：先结果(20002)后图像(20000)，PC 收到图像时结果已到，可直接叠加
 #if SEND_RESULT_VIA_UDP
             send_posture_result_via_udp(&output);
 #endif
@@ -217,6 +243,9 @@ void app_main(void)
 
     // 打印最终中断分配情况
     esp_intr_dump(NULL);
+
+    // 启动 UDP 自动发现监听（PC 周期广播 → 自动学习/更新目标 IP，免改 UDP_SERVER_IP）
+    udp_discovery_start();
 
     // 启动坐姿检测推理任务（core 1，避开 core 0 的 wifi 任务争用 CPU）
     xTaskCreatePinnedToCore(posture_inference_task, "posture_inf", 32768, NULL, 5, NULL, 1);

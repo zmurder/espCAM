@@ -48,7 +48,8 @@ typedef enum
     POSTURE_OK = 0,            // 坐姿正常
     POSTURE_BAD_NECK = 1,      // 头部前倾（眼肩垂直距离/肩宽 比值偏低）
     POSTURE_BAD_SHOULDER = 2,  // 肩膀歪斜（双肩倾斜角超阈）
-    POSTURE_NOT_DETECTED = 3,  // 关键点检测失败（不可信：双肩不可见或可见点 < 3）
+    POSTURE_NOT_DETECTED = 3,  // 关键点检测失败（不可信：双肩不可见或头部关键点全不可见）
+    POSTURE_UNRELIABLE = 4,    // 检测几何不合理（同组连线近垂直等明显误检），本帧不判断
 } posture_result_t;
 
 // 头部定位来源（双眼不可见时用双耳兜底）

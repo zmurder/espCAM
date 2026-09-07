@@ -36,7 +36,7 @@ app_main.c                    # 入口点 - 初始化所有子系统
 ├── posture_inference_task()   # 模型推理任务（摄像头→推理→姿态判断→音频提示）
 ├── dns_server.c               # DNS 重定向用于强制门户
 └── start_udp_camera()         # UDP 图像传输任务（独立运行）
-    └── send_image_via_udp()   # 发送到 UDP_SERVER_IP:8080，音频在 :8081
+    └── send_image_via_udp()   # 发送到 UDP_SERVER_IP:20000，音频在 :20001
 ```
 
 ### 双 WiFi 模式
@@ -47,9 +47,11 @@ app_main.c                    # 入口点 - 初始化所有子系统
 
 ### UDP 协议
 
-- **端口 8080**：摄像头帧数据（分包传输，每包最大 1400 字节）
-- **端口 8081**：来自 PC 的音频流（8-bit PCM）
-- 目标 IP：`UDP_SERVER_IP`（默认 `192.168.5.3`，可在 `udp_camera_client.c` 中修改）
+- **端口 20000**：摄像头帧数据（分包传输，每包最大 1400 字节）
+- **端口 20001**：来自 PC 的音频流（8-bit PCM）
+- **端口 20002**：检测结果（result + ratio + 6 关键点，78 字节）
+- **端口 20003**：自动发现 —— PC 端 `simple_udp_receiver.py` 每 2s 广播发现包，ESP32（`udp_discovery_task`）学习其源 IP 作为 20000/20002 发送目标并回 ACK；PC IP 变化后 2s 内自动跟随
+- 目标 IP：`UDP_SERVER_IP`（`udp_camera_client.c`）仅为编译期默认值，运行时由 20003 发现机制自动覆盖
 
 ### 音频播放
 
@@ -83,14 +85,15 @@ app_main.c                    # 入口点 - 初始化所有子系统
 **后处理（`main/posture_model.cpp`）：**
 - heatmap 每通道 int8 argmax，`conf = max_int8 × 2^exponent`（Sigmoid 输出，已在 [0,1]）
 - 输出 layout 按 `output_shape` 自适应（NHWC/NCHW 均支持，启动日志会打印 `chan_dim`）
-- `conf < 0.6` 视为不可信
+- 置信度阈值：眼/耳 `CONF_THRESH=0.4`，双肩单独 `SHOULDER_CONF_THRESH=0.3`（趴近时肩 conf 偏低但仍需作基准）
 
-**姿态判断逻辑：**
-- 可信判据：双肩均可见 && 可见关键点 ≥ 3，否则 `POSTURE_NOT_DETECTED`
-- `POSTURE_BAD_SHOULDER`（歪斜）：双肩连线倾斜角绝对值 > 10°
-- `POSTURE_BAD_NECK`（前倾）：眼肩垂直距离 / 肩宽 < 0.5（仅双眼可见时判断）
-- 头部定位：双眼优先，低头看不到眼时用双耳兜底（仅用于日志，不参与判废）
-- 不良姿态触发 `audio_player_play_posture_alert()` 播放 `res/bad_pose.mp3` 提示音
+**姿态判断逻辑（4 条标准任意成立即不良，阈值均为宏，见 `main/posture_model.cpp`）：**
+- 可信前提：双肩均可见 && 双眼或双耳可见，否则 `POSTURE_NOT_DETECTED`
+- 几何合理性预检（防误检误报）：同组连线（双肩/双眼/双耳）|倾斜角| > `*_LINE_TILT_MAX`（默认 45°，近垂直属明显误检）→ 双肩误检或眼+耳全误检判 `POSTURE_UNRELIABLE`（本帧不判断、不播提示音）；仅一组头部误检则跳过该组条件、用另一组照常判断
+- `POSTURE_BAD_NECK`（前倾）：眼肩垂直距离/双眼距 < `EYE_FORWARD_RATIO_MIN`，或 耳肩垂直距离/双耳距 < `EAR_FORWARD_RATIO_MIN`
+- `POSTURE_BAD_SHOULDER`（歪头）：双眼-双肩相对倾斜角 > `EYE_HEAD_TILT_WARN`，或 双耳-双肩相对倾斜角 > `EAR_HEAD_TILT_WARN`
+- 头部定位：双眼优先，眼不可见时用双耳兜底
+- 不良语音提示：连续 `POSTURE_ALERT_CONSECUTIVE`（`app_main.c`，默认 3）帧不良才触发 `audio_player_play_posture_alert()` 播放 `res/bad_pose.mp3`（中断重新计数；触发一次后持续不良不重播，恢复后才可再触发；UDP 逐帧 result 不受影响）
 
 ### 主要文件
 

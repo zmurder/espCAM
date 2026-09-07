@@ -15,6 +15,7 @@
  * - 坐姿判断（4 条任意成立即不良，详见 judge_posture）：
  *   前倾(NECK) = 眼肩垂直距离/双眼距 或 耳肩垂直距离/双耳距 < FORWARD_RATIO 阈值（EYE/EAR_FORWARD_RATIO_MIN）；
  *   歪头(SHOULDER) = 双眼/双耳-双肩相对倾斜角 > HEAD_TILT_WARN 阈值（EYE/EAR_HEAD_TILT_WARN）
+ * - 几何合理性预检：同组连线（双肩/双眼/双耳）近垂直属明显误检，超阈本帧不判断（POSTURE_UNRELIABLE）
  */
 
 #include <string.h>
@@ -60,11 +61,15 @@ static const std::array<float, 3> IMAGENET_STD = {58.395f, 57.12f, 57.375f};
 
 // 坐姿判断阈值（不良坐姿：下列 4 条任意成立即触发；详见 judge_posture）
 #define CONF_THRESH 0.4f            // 关键点置信度阈值（眼/耳，<此值视为不可信）
-#define SHOULDER_CONF_THRESH 0.2f   // 双肩单独阈值（更低；趴近时肩 conf 偏低但仍需作为参考基准）
+#define SHOULDER_CONF_THRESH 0.3f   // 双肩单独阈值（更低；趴近时肩 conf 偏低但仍需作为参考基准）
 #define EYE_FORWARD_RATIO_MIN 1.5f  // 条件1：眼肩垂直距离/双眼距离 < 此值 → 前倾（需据正常坐姿日志标定）
 #define EAR_FORWARD_RATIO_MIN 1.5f  // 条件2：耳肩垂直距离/双耳距离 < 此值 → 前倾（需据正常坐姿日志标定）
 #define EYE_HEAD_TILT_WARN 35.0f    // 条件3：双眼-双肩相对倾斜角 > 此值 → 歪头（度）
 #define EAR_HEAD_TILT_WARN 35.0f    // 条件4：双耳-双肩相对倾斜角 > 此值 → 歪头（度）
+// 几何合理性预检（防误检误报）：正常坐姿下同组连线接近水平，|倾斜角| 超阈（如接近垂直）视为明显误检
+#define SHOULDER_LINE_TILT_MAX 40.0f  // 双肩连线 |倾斜角| > 此值 → 双肩误检，本帧不判断（度）
+#define EYE_LINE_TILT_MAX 40.0f       // 双眼连线 |倾斜角| > 此值 → 该组误检，跳过眼条件（度）
+#define EAR_LINE_TILT_MAX 40.0f       // 双耳连线 |倾斜角| > 此值 → 该组误检，跳过耳条件（度）
 
 // 解析热力图：每关键点 int8 argmax + dequantize conf
 // chan_dim: 通道维在 4D shape [N,?, ?, ?] 中的位置 —— 1=NCHW(旧参考)，3=NHWC(ESP-DL 实测)
@@ -125,6 +130,8 @@ static inline float normalize_tilt(float deg)
 
 // 不良坐姿判断（6 关键点）：以下 4 条任意成立即判不良；某条所需关键点不可见时跳过该条。
 //  可靠前提：双肩可见（垂直距离与相对角度的基准）且至少一组头部(眼或耳)可见，否则 POSTURE_NOT_DETECTED。
+//  几何合理性预检（防误检误报）：正常坐姿下同组连线接近水平；双肩连线不合理（或眼+耳全不合理）时
+//  关键点属明显误检（如连线近垂直）→ POSTURE_UNRELIABLE 本帧不判断；仅一组头部连线不合理则跳过该组条件。
 //  前倾(BAD_NECK)：
 //   1) 眼肩垂直距离 / 双眼距离 < EYE_FORWARD_RATIO_MIN   （双眼可见时评估）
 //   2) 耳肩垂直距离 / 双耳距离 < EAR_FORWARD_RATIO_MIN   （双耳可见时评估）
@@ -153,18 +160,45 @@ static posture_result_t judge_posture(posture_keypoint_data_t* kp, float* out_ra
     *out_shoulder_tilt = normalize_tilt(atan2f(sdy, sdx) * 180.0f / (float)M_PI);
     float shoulder_y_avg = (kp[KEYPOINT_LEFT_SHOULDER].y + kp[KEYPOINT_RIGHT_SHOULDER].y) * 0.5f;
 
-    // 默认输出（可靠前提下至少一组头部可见，会被下方覆盖）
+    // 预检①：双肩是全部判断的基准，连线近垂直属明显误检 → 本帧不判断
+    if (fabsf(*out_shoulder_tilt) > SHOULDER_LINE_TILT_MAX) {
+        ESP_LOGW(TAG, "shoulder line tilt=%.1f > %.1f, unreliable detection, skip frame", *out_shoulder_tilt, (double)SHOULDER_LINE_TILT_MAX);
+        return POSTURE_UNRELIABLE;
+    }
+
+    // 预检②：眼/耳组连线近垂直 → 该组视为误检，跳过其条件（另一组可用则照常判断）
+    float eye_tilt = 0.0f, ear_tilt = 0.0f;
+    bool eyes_usable = eyes_ok;
+    bool ears_usable = ears_ok;
+    if (eyes_ok) {
+        eye_tilt = normalize_tilt(atan2f(kp[KEYPOINT_RIGHT_EYE].y - kp[KEYPOINT_LEFT_EYE].y, kp[KEYPOINT_RIGHT_EYE].x - kp[KEYPOINT_LEFT_EYE].x) * 180.0f / (float)M_PI);
+        if (fabsf(eye_tilt) > EYE_LINE_TILT_MAX) {
+            ESP_LOGW(TAG, "eye line tilt=%.1f > %.1f, eye unreliable, skip eye conditions", eye_tilt, (double)EYE_LINE_TILT_MAX);
+            eyes_usable = false;
+        }
+    }
+    if (ears_ok) {
+        ear_tilt = normalize_tilt(atan2f(kp[KEYPOINT_RIGHT_EAR].y - kp[KEYPOINT_LEFT_EAR].y, kp[KEYPOINT_RIGHT_EAR].x - kp[KEYPOINT_LEFT_EAR].x) * 180.0f / (float)M_PI);
+        if (fabsf(ear_tilt) > EAR_LINE_TILT_MAX) {
+            ESP_LOGW(TAG, "ear line tilt=%.1f > %.1f, ear unreliable, skip ear conditions", ear_tilt, (double)EAR_LINE_TILT_MAX);
+            ears_usable = false;
+        }
+    }
+    if (!eyes_usable && !ears_usable) {  // 头部两组连线全部不合理 → 检测不可信
+        return POSTURE_UNRELIABLE;
+    }
+
+    // 默认输出（可靠前提下至少一组头部连线可用，会被下方覆盖）
     *out_head_source = HEAD_SRC_NONE;
     *out_head_tilt = 0.0f;
     *out_ratio = 0.0f;
 
-    // 条件 1 & 3：双眼可见 → 前倾比 + 歪头角
-    if (eyes_ok) {
+    // 条件 1 & 3：双眼连线可用 → 前倾比 + 歪头角
+    if (eyes_usable) {
         float edx = kp[KEYPOINT_RIGHT_EYE].x - kp[KEYPOINT_LEFT_EYE].x;
         float edy = kp[KEYPOINT_RIGHT_EYE].y - kp[KEYPOINT_LEFT_EYE].y;
         float eye_dist = sqrtf(edx * edx + edy * edy);
         float eye_y_avg = (kp[KEYPOINT_LEFT_EYE].y + kp[KEYPOINT_RIGHT_EYE].y) * 0.5f;
-        float eye_tilt = normalize_tilt(atan2f(edy, edx) * 180.0f / (float)M_PI);
         float eye_forward_ratio = (eye_dist > 0.001f) ? ((shoulder_y_avg - eye_y_avg) / eye_dist) : 0.0f;  // 条件1
         float eye_head_rel = normalize_tilt(eye_tilt - *out_shoulder_tilt);                                // 条件3
 
@@ -177,13 +211,12 @@ static posture_result_t judge_posture(posture_keypoint_data_t* kp, float* out_ra
         if (fabsf(eye_head_rel) > EYE_HEAD_TILT_WARN) return POSTURE_BAD_SHOULDER;  // 条件3
     }
 
-    // 条件 2 & 4：双耳可见 → 前倾比 + 歪头角（与双眼平行评估；眼不可见时兜底）
-    if (ears_ok) {
+    // 条件 2 & 4：双耳连线可用 → 前倾比 + 歪头角（与双眼平行评估；眼不可用时兜底）
+    if (ears_usable) {
         float edx = kp[KEYPOINT_RIGHT_EAR].x - kp[KEYPOINT_LEFT_EAR].x;
         float edy = kp[KEYPOINT_RIGHT_EAR].y - kp[KEYPOINT_LEFT_EAR].y;
         float ear_dist = sqrtf(edx * edx + edy * edy);
         float ear_y_avg = (kp[KEYPOINT_LEFT_EAR].y + kp[KEYPOINT_RIGHT_EAR].y) * 0.5f;
-        float ear_tilt = normalize_tilt(atan2f(edy, edx) * 180.0f / (float)M_PI);
         float ear_forward_ratio = (ear_dist > 0.001f) ? ((shoulder_y_avg - ear_y_avg) / ear_dist) : 0.0f;  // 条件2
         float ear_head_rel = normalize_tilt(ear_tilt - *out_shoulder_tilt);                                // 条件4
 

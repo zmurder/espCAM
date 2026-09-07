@@ -26,6 +26,9 @@
 
 static const char* TAG = "camera";  // 添加TAG用于日志输出
 
+// 上下翻转（vflip，OV3660 硬件寄存器，免费）：1=启用（适配倒装镜头），0=正常
+#define CAMERA_VFLIP 1
+
 static camera_config_t camera_config = {
     .pin_pwdn = CAM_PIN_PWDN,
     .pin_reset = CAM_PIN_RESET,
@@ -92,7 +95,16 @@ esp_err_t camera_init()
         ESP_LOGI(TAG, "Camera Init Success");
     }
 
-
+    // 上下翻转（OV3660 硬件寄存器，免费；适配倒装的镜头方向）
+#if CAMERA_VFLIP
+    sensor_t* s = esp_camera_sensor_get();
+    if (s != NULL && s->set_vflip != NULL) {
+        s->set_vflip(s, 1);
+        ESP_LOGI(TAG, "Camera vertical flip enabled");
+    } else {
+        ESP_LOGW(TAG, "Camera sensor does not support vflip");
+    }
+#endif
 
     return ESP_OK;
 }
