@@ -48,3 +48,9 @@ CONFIG_ESP_TASK_WDT_TIMEOUT_S=40
 
 # CPU 240MHz（最高频，加速模型推理；SDK 默认仅 160MHz）
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# 日志时间戳使用系统时间：SNTP 对时后（time_sync.c）所有日志带真实日期时间
+CONFIG_LOG_TIMESTAMP_SOURCE_SYSTEM=y
+
+# SNTP 服务器数量：time_sync.c 配置了主备两台（ntp.aliyun.com + pool.ntp.org）
+CONFIG_LWIP_SNTP_MAX_SERVERS=2

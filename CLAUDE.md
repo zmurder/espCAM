@@ -106,6 +106,7 @@ app_main.c                    # 入口点 - 初始化所有子系统
 | `main/wifi_manager.c`        | WiFi AP/STA 初始化和事件处理       |
 | `main/wifi_config_manager.c` | 强制门户，NVS 凭据存储             |
 | `main/udp_camera_client.c`   | UDP 图像/音频发送和接收任务        |
+| `main/time_sync.c`           | SNTP 网络对时（拿到 IP 自动同步，CST-8） |
 | `main/audio_player.c`        | I2S 播放（状态提示音和音频流）     |
 | `main/bad_pose.h`            | 坐姿不良提示音数据（由 `res/bad_pose.mp3` 转换） |
 | `main/led.c`                 | LED 呼吸/闪烁模式                  |

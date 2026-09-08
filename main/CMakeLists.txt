@@ -20,7 +20,7 @@ endif()
 # 嵌入文件列表（模型 + 测试图）
 set(embed_files ${MODEL_FILE_PATH} ${TEST_IMAGE_PATH})
 
-idf_component_register(SRCS  "app_main.c" "cam.c" "udp_camera_client.c" "wifi_config_manager.c" "wifi_manager.c" "led.c" "dns_server.c" "audio_player.c" "posture_model.cpp"
+idf_component_register(SRCS  "app_main.c" "cam.c" "udp_camera_client.c" "wifi_config_manager.c" "wifi_manager.c" "led.c" "dns_server.c" "audio_player.c" "time_sync.c" "posture_model.cpp"
                     INCLUDE_DIRS "."
                     EMBED_FILES ${embed_files})
 

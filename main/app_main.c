@@ -30,6 +30,7 @@
 #include "udp_camera_client.h"
 #include "posture_model.h"
 #include "audio_player.h"
+#include "time_sync.h"
 
 static const char* TAG = "APP_MAIN";
 
@@ -162,6 +163,9 @@ void app_main(void)
 {
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+    // SNTP 对时：STA 拿到 IP 后自动同步；配合 SYSTEM 日志时间戳源，此后日志带真实日期时间
+    time_sync_init();
 
     // Initialize NVS
     esp_err_t ret = nvs_flash_init();

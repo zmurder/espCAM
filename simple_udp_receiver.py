@@ -36,8 +36,11 @@ KP_NAMES = ["L_eye", "R_eye", "L_ear", "R_ear", "L_sh", "R_sh"]
 KP_COLORS = ["red", "blue", "magenta", "purple", "orange", "cyan"]
 RESULT_TAG = {0: "OK", 1: "BAD_NECK", 2: "BAD_SHOULDER", 3: "NOT_DET", 4: "UNRELIABLE"}
 
-# 绘制开关：True=叠加关键点（连线+圆圈+标签）+ 左上角判断文字；False=只存干净原图
-DRAW_KEYPOINTS = True  # False True
+# 绘制开关：True=叠加关键点（连线+圆圈+标签）+ 左上角判断文字 + 右下角时间戳；False=只存干净原图
+DRAW_KEYPOINTS = True
+
+# 保存频率：每收到 N 帧图像只保存 1 帧（1=每帧都存）。跳过的帧不解码不落盘，
+SAVE_EVERY_N = 1
 
 # 与 ESP judge_posture 一致的阈值（4 条任意成立即不良；左上角显示参考用）
 EYE_FORWARD_RATIO_MIN = 1.5  # 条件1：眼肩垂直距离/双眼距离 < 此值 → 前倾（需据正常坐姿标定）
@@ -108,6 +111,7 @@ def discovery_broadcaster():
 # 最新检测结果（result 线程写，image 线程读）
 latest = {"result": -1, "ratio": 0.0, "kps": []}
 lock = threading.Lock()
+frame_seq = 0  # 已收到的完整图像帧计数（SAVE_EVERY_N 抽稀保存用）
 os.makedirs("received_images", exist_ok=True)
 
 
@@ -167,6 +171,11 @@ def image_receiver():
 
 
 def on_image(jpg):
+    global frame_seq
+    frame_seq += 1
+    if (frame_seq - 1) % SAVE_EVERY_N != 0:  # 首帧即保存，之后每 N 帧存 1 帧
+        return
+
     if len(jpg) < 2 or jpg[0] != 0xFF or jpg[1] != 0xD8:
         print("[image]  非 JPEG，丢弃")
         return
@@ -251,10 +260,16 @@ def on_image(jpg):
                 draw.text((4, yy), line, fill=color)
                 yy += 12
 
+    # 右下角时间戳：PC 收到本帧的时刻（同样受 DRAW_KEYPOINTS 控制）
+    if DRAW_KEYPOINTS:
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        tw = draw.textlength(stamp)
+        draw.text((W - tw - 4, H - 14), stamp, fill="yellow")
+
     ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
     out = f"received_images/image_{ts}.png"
     img.save(out)
-    print(f"[image]  保存 {out}  ({RESULT_TAG.get(result, '?')})")
+    print(f"[image]  保存 {out}  第{frame_seq}帧 ({RESULT_TAG.get(result, '?')})")
 
 
 if __name__ == "__main__":
