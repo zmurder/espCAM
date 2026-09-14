@@ -31,6 +31,7 @@
 #include "posture_model.h"
 #include "audio_player.h"
 #include "time_sync.h"
+#include "posture_sched.h"
 
 static const char* TAG = "APP_MAIN";
 
@@ -88,6 +89,12 @@ static void posture_inference_task(void* arg)
 #else
     // 实际推理模式：一次捕获，同时用于推理和UDP发送
     while (1) {
+        // 检测时间段调度：窗口外不取帧不推理不发送（时间未同步/未设置时段时始终检测）
+        if (!posture_sched_is_active()) {
+            vTaskDelay(pdMS_TO_TICKS(5000));  // 低频轮询等待进窗（分钟级粒度足够）
+            continue;
+        }
+
         camera_fb_t* fb = esp_camera_fb_get();
         if (fb == NULL) {
             ESP_LOGW(TAG, "Failed to get camera frame");
@@ -134,6 +141,9 @@ static void posture_inference_task(void* arg)
                 else if (output.result == POSTURE_UNRELIABLE) {
                     ESP_LOGW(TAG, "Posture: unreliable keypoints (implausible geometry), skip");
                 }
+                else if (output.result == POSTURE_TOO_FAR) {
+                    ESP_LOGW(TAG, "Posture: subject too far, skip");
+                }
             }
 
 // UDP 输出：先结果(20002)后图像(20000)，PC 收到图像时结果已到，可直接叠加
@@ -174,6 +184,10 @@ void app_main(void)
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
+
+    // 检测时间段调度：从 NVS 加载（断电保持；须在 nvs_flash_init 之后）；
+    // 时间未同步或未设置时段时全天检测
+    posture_sched_init();
 
     /* Initialize status LED on GPIO2, active High */
     led_init(2, false);

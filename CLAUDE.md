@@ -50,8 +50,20 @@ app_main.c                    # 入口点 - 初始化所有子系统
 - **端口 20000**：摄像头帧数据（分包传输，每包最大 1400 字节）
 - **端口 20001**：来自 PC 的音频流（8-bit PCM）
 - **端口 20002**：检测结果（result + ratio + 6 关键点，78 字节）
-- **端口 20003**：自动发现 —— PC 端 `simple_udp_receiver.py` 每 2s 广播发现包，ESP32（`udp_discovery_task`）学习其源 IP 作为 20000/20002 发送目标并回 ACK；PC IP 变化后 2s 内自动跟随
+- **端口 20003**：自动发现 + 检测时间段调度（文本协议，与 `udp_discovery_task` 对应）
+  - `ESPCAM_DISCOVER` → ESP 学习源 IP 并回 `ESPCAM_ACK`；PC 端每 2s 广播（双保险：受限广播 + /24 定向广播），PC IP 变化后 2s 内自动跟随
+  - `ESPCAM_SCHED_GET` → ESP 回 `ESPCAM_SCHED_STATE synced active n HH:MM HH:MM ...`（当前调度状态）
+  - `ESPCAM_SCHED_SET n HH:MM HH:MM ...` → 设置检测时段（n≤5，n=0 清空），ESP 存 NVS 并回 SCHED_STATE 确认；解析失败回 `ESPCAM_SCHED_ERR 原因`；PC 端由 `POSTURE_SCHED_SLOTS` 常量控制（None=不下发 / []=清空 / 非空=设置），也可运行中交互命令 `s 09:00-11:30,14:00-18:00` / `s clear` 下发（本地预校验）
+  - SNTP 对时成功时 ESP 主动向已学习 IP 推送一次 SCHED_STATE
 - 目标 IP：`UDP_SERVER_IP`（`udp_camera_client.c`）仅为编译期默认值，运行时由 20003 发现机制自动覆盖
+
+### 坐姿历史记录（PC 端）
+
+- `simple_udp_receiver.py` 把每帧检测结果（时间戳 + result + ratio，kps 不入库）逐帧写入 SQLite：`posture_history.db` 表 `posture_log(ts, result, ratio)`；自动建库，写库失败不影响接收
+- `posture_report.py` 查询该库出报告：`python posture_report.py day|week|month|quarter|year`（中文同义：天/周/月/季度/年；可选 `--db 库路径` `--no-show`）
+  - 窗口=自然周期（今日/本周一/本月 1 日/季度首月/1 月 1 日）~ 现在；分桶：day→按小时、week/month→按天、quarter→按周、year→按月
+  - 输出单张并列柱形图（PNG + 交互窗口）：每桶检测次数（蓝）+ 不良次数（橙）
+  - 控制台统计：检测/不良帧数、不良率（不良帧/有效判断帧，NOT_DET/UNRELIABLE/TOO_FAR 不计入分母）、不良事件次数与最长持续（连续 BAD 间隔>5s 分段）
 
 ### 音频播放
 
@@ -83,17 +95,25 @@ app_main.c                    # 入口点 - 初始化所有子系统
 - RGB（`rgb_swap=false`），HWC→CHW，按 input exponent 量化到 int8
 
 **后处理（`main/posture_model.cpp`）：**
-- heatmap 每通道 int8 argmax，`conf = max_int8 × 2^exponent`（Sigmoid 输出，已在 [0,1]）
+- heatmap 每通道 int8 argmax + 峰邻域正值加权质心（亚像素细化，±1 格 → ~±0.3 格，降低小目标定位噪声），`conf = max_int8 × 2^exponent`（Sigmoid 输出，已在 [0,1]）
 - 输出 layout 按 `output_shape` 自适应（NHWC/NCHW 均支持，启动日志会打印 `chan_dim`）
 - 置信度阈值：眼/耳 `CONF_THRESH=0.4`，双肩单独 `SHOULDER_CONF_THRESH=0.3`（趴近时肩 conf 偏低但仍需作基准）
 
 **姿态判断逻辑（4 条标准任意成立即不良，阈值均为宏，见 `main/posture_model.cpp`）：**
 - 可信前提：双肩均可见 && 双眼或双耳可见，否则 `POSTURE_NOT_DETECTED`
-- 几何合理性预检（防误检误报）：同组连线（双肩/双眼/双耳）|倾斜角| > `*_LINE_TILT_MAX`（默认 45°，近垂直属明显误检）→ 双肩误检或眼+耳全误检判 `POSTURE_UNRELIABLE`（本帧不判断、不播提示音）；仅一组头部误检则跳过该组条件、用另一组照常判断
+- 距离门限：双肩间距（归一化）< `SHOULDER_DIST_MIN`（默认 0.19）→ `POSTURE_TOO_FAR` 本帧不判断（人太远时 heatmap 定位噪声占比过大，远距离误报根源；阈值需据远距离日志标定）
+- 几何合理性预检（防误检误报）：同组连线（双肩/双眼/双耳）|倾斜角| > `*_LINE_TILT_MAX`（默认 40°，近垂直属明显误检）→ 双肩误检或眼+耳全误检判 `POSTURE_UNRELIABLE`（本帧不判断、不播提示音）；仅一组头部误检则跳过该组条件、用另一组照常判断
 - `POSTURE_BAD_NECK`（前倾）：眼肩垂直距离/双眼距 < `EYE_FORWARD_RATIO_MIN`，或 耳肩垂直距离/双耳距 < `EAR_FORWARD_RATIO_MIN`
 - `POSTURE_BAD_SHOULDER`（歪头）：双眼-双肩相对倾斜角 > `EYE_HEAD_TILT_WARN`，或 双耳-双肩相对倾斜角 > `EAR_HEAD_TILT_WARN`
 - 头部定位：双眼优先，眼不可见时用双耳兜底
-- 不良语音提示：连续 `POSTURE_ALERT_CONSECUTIVE`（`app_main.c`，默认 3）帧不良才触发 `audio_player_play_posture_alert()` 播放 `res/bad_pose.mp3`（中断重新计数；触发一次后持续不良不重播，恢复后才可再触发；UDP 逐帧 result 不受影响）
+- 不良语音提示：连续 `POSTURE_ALERT_CONSECUTIVE`（`app_main.c`，默认 2）帧不良才触发 `audio_player_play_posture_alert()` 播放 `res/bad_pose.mp3`（中断重新计数；触发一次后持续不良不重播，恢复后才可再触发；UDP 逐帧 result 不受影响）
+
+### 检测时间段调度（`main/posture_sched.c`）
+
+- 最多 5 个每日重复时段，[start, end) 左闭右开，支持跨午夜（start > end 如 22:00-06:30）；0 段 = 全天检测
+- 设置经 20003 端口下发（见上），写入 NVS（namespace `psched`，key `slots`），断电重启后仍生效
+- **时间未同步（SNTP 未完成）或未设置时段时全部检测**（降级策略）；同步完成瞬间主动推送状态
+- 窗口外推理任务不取帧不推理不发送（5s 低频轮询等待进窗），进入/离开窗口有边沿日志
 
 ### 主要文件
 
@@ -107,6 +127,9 @@ app_main.c                    # 入口点 - 初始化所有子系统
 | `main/wifi_config_manager.c` | 强制门户，NVS 凭据存储             |
 | `main/udp_camera_client.c`   | UDP 图像/音频发送和接收任务        |
 | `main/time_sync.c`           | SNTP 网络对时（拿到 IP 自动同步，CST-8） |
+| `main/posture_sched.c`       | 检测时间段调度（NVS 持久化、跨午夜、未同步全检测） |
+| `simple_udp_receiver.py`     | PC 端接收器：图像/结果接收叠加、发现+调度下发（交互命令 s）、历史落库（SQLite） |
+| `posture_report.py`          | 坐姿历史报告：多时间窗统计 + 趋势图（matplotlib） |
 | `main/audio_player.c`        | I2S 播放（状态提示音和音频流）     |
 | `main/bad_pose.h`            | 坐姿不良提示音数据（由 `res/bad_pose.mp3` 转换） |
 | `main/led.c`                 | LED 呼吸/闪烁模式                  |

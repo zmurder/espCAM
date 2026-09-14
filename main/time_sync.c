@@ -13,6 +13,8 @@
 #include "esp_netif.h"
 #include "esp_sntp.h"
 
+#include "posture_sched.h"
+
 static const char* TAG = "TIME_SYNC";
 
 // 同步完成回调：打印一次当前时间，方便确认对时成功
@@ -23,6 +25,7 @@ static void on_time_sync(struct timeval* tv)
     char buf[32];
     strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &timeinfo);
     ESP_LOGI(TAG, "Time synced: %s (CST)", buf);
+    posture_sched_notify_time_synced();  // 调度模块播报生效时段 + 推送状态到 PC
 }
 
 // STA 拿到 IP（含配网后重连）即启动 SNTP；重复调用时幂等

@@ -16,6 +16,11 @@ esp_err_t send_image_via_udp(camera_fb_t* fb);
 void udp_discovery_start(void);
 
 /**
+ * @brief 主动推送检测时间段状态到 PC（posture_sched 在 SNTP 同步后调用）
+ */
+void udp_sched_push_state(void);
+
+/**
  * @brief 启动UDP图像传输
  */
 void start_udp_camera(void);

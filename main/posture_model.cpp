@@ -16,6 +16,7 @@
  *   前倾(NECK) = 眼肩垂直距离/双眼距 或 耳肩垂直距离/双耳距 < FORWARD_RATIO 阈值（EYE/EAR_FORWARD_RATIO_MIN）；
  *   歪头(SHOULDER) = 双眼/双耳-双肩相对倾斜角 > HEAD_TILT_WARN 阈值（EYE/EAR_HEAD_TILT_WARN）
  * - 几何合理性预检：同组连线（双肩/双眼/双耳）近垂直属明显误检，超阈本帧不判断（POSTURE_UNRELIABLE）
+ * - 距离门限：肩距过小（人太远）→ 定位误差占比过大，本帧不判断（POSTURE_TOO_FAR）
  */
 
 #include <string.h>
@@ -70,9 +71,19 @@ static const std::array<float, 3> IMAGENET_STD = {58.395f, 57.12f, 57.375f};
 #define SHOULDER_LINE_TILT_MAX 40.0f  // 双肩连线 |倾斜角| > 此值 → 双肩误检，本帧不判断（度）
 #define EYE_LINE_TILT_MAX 40.0f       // 双眼连线 |倾斜角| > 此值 → 该组误检，跳过眼条件（度）
 #define EAR_LINE_TILT_MAX 40.0f       // 双耳连线 |倾斜角| > 此值 → 该组误检，跳过耳条件（度）
+#define SHOULDER_DIST_MIN 0.19f       // 肩距(归一化) < 此值 → 人太远（heatmap 定位误差占比大，远距离误报根源），本帧不判断（需据远距离日志标定）
 
-// 解析热力图：每关键点 int8 argmax + dequantize conf
+// 解析热力图：每关键点 int8 argmax + 亚像素质心 + dequantize conf
 // chan_dim: 通道维在 4D shape [N,?, ?, ?] 中的位置 —— 1=NCHW(旧参考)，3=NHWC(ESP-DL 实测)
+
+// 按 layout 取 heatmap (x, y, k) 处的 int8 值（chan_dim 语义同 parse_heatmaps）
+static inline int8_t hm_at(const int8_t* hm, int chan_dim, int x, int y, int k)
+{
+    if (chan_dim == 1) {
+        return hm[(k * HEATMAP_H + y) * HEATMAP_W + x];   // NCHW [1,C,H,W]
+    }
+    return hm[(y * HEATMAP_W + x) * KEYPOINT_COUNT + k];  // NHWC [1,H,W,C]
+}
 static void parse_heatmaps(const int8_t* quant_heatmaps, int exponent, int chan_dim, posture_keypoint_data_t* keypoints)
 {
     const float scale = powf(2.0f, (float)exponent);  // 对称量化: float = int8 × 2^exp
@@ -100,9 +111,26 @@ static void parse_heatmaps(const int8_t* quant_heatmaps, int exponent, int chan_
             }
         }
 
+        // 亚像素峰值定位：argmax 只有 ±1 格精度（≈输入 2px），远距离小目标误差占比过大
+        //（双眼仅隔数格时 ±1 格 = 20% 噪声）。用峰及左右/上下邻居的正值做加权质心，
+        // 把定位细化到格子内部（~±0.3 格）。邻居 ≤0（int8 背景为负/零）或峰贴边时不参与，退化为整数格
+        float sub_x = 0.0f, sub_y = 0.0f;
+        if (max_col > 0 && max_col < HEATMAP_W - 1) {
+            float vl = hm_at(quant_heatmaps, chan_dim, max_col - 1, max_row, k);
+            float vr = hm_at(quant_heatmaps, chan_dim, max_col + 1, max_row, k);
+            if (vl > 0 && vr > 0)
+                sub_x = (vr - vl) / (vl + (float)maxv + vr);
+        }
+        if (max_row > 0 && max_row < HEATMAP_H - 1) {
+            float vu = hm_at(quant_heatmaps, chan_dim, max_col, max_row - 1, k);
+            float vd = hm_at(quant_heatmaps, chan_dim, max_col, max_row + 1, k);
+            if (vu > 0 && vd > 0)
+                sub_y = (vd - vu) / (vu + (float)maxv + vd);
+        }
+
         // 归一化到 [0,1]（相对 320×240 模型输入；heatmap 160×120 = 输入 1/2，归一化值等价）
-        keypoints[k].x = (float)max_col / (float)HEATMAP_W;
-        keypoints[k].y = (float)max_row / (float)HEATMAP_H;
+        keypoints[k].x = ((float)max_col + sub_x) / (float)HEATMAP_W;
+        keypoints[k].y = ((float)max_row + sub_y) / (float)HEATMAP_H;
         keypoints[k].score = (float)maxv * scale;  // dequantize（Sigmoid 输出，已在 [0,1]）
         keypoints[k].valid = keypoints[k].score >= CONF_THRESH;
 
@@ -132,6 +160,7 @@ static inline float normalize_tilt(float deg)
 //  可靠前提：双肩可见（垂直距离与相对角度的基准）且至少一组头部(眼或耳)可见，否则 POSTURE_NOT_DETECTED。
 //  几何合理性预检（防误检误报）：正常坐姿下同组连线接近水平；双肩连线不合理（或眼+耳全不合理）时
 //  关键点属明显误检（如连线近垂直）→ POSTURE_UNRELIABLE 本帧不判断；仅一组头部连线不合理则跳过该组条件。
+//  距离门限：肩距（归一化）过小 → 人太远，heatmap 定位误差占比过大 → POSTURE_TOO_FAR 本帧不判断。
 //  前倾(BAD_NECK)：
 //   1) 眼肩垂直距离 / 双眼距离 < EYE_FORWARD_RATIO_MIN   （双眼可见时评估）
 //   2) 耳肩垂直距离 / 双耳距离 < EAR_FORWARD_RATIO_MIN   （双耳可见时评估）
@@ -159,6 +188,15 @@ static posture_result_t judge_posture(posture_keypoint_data_t* kp, float* out_ra
     float sdy = kp[KEYPOINT_RIGHT_SHOULDER].y - kp[KEYPOINT_LEFT_SHOULDER].y;
     *out_shoulder_tilt = normalize_tilt(atan2f(sdy, sdx) * 180.0f / (float)M_PI);
     float shoulder_y_avg = (kp[KEYPOINT_LEFT_SHOULDER].y + kp[KEYPOINT_RIGHT_SHOULDER].y) * 0.5f;
+
+    // 预检⓪ 距离门限：肩距过小说明人太远，比值分母/角度分子都只有几个 heatmap 格子宽，
+    // 定位噪声占比过大（远距离误报根源）→ 本帧不判断
+    float shoulder_dist = sqrtf(sdx * sdx + sdy * sdy);
+    ESP_LOGI(TAG, "  shoulder_dist=%.3f (min %.3f)", shoulder_dist, (double)SHOULDER_DIST_MIN);  // 每帧打印，供标定 SHOULDER_DIST_MIN
+    if (shoulder_dist < SHOULDER_DIST_MIN) {
+        ESP_LOGW(TAG, "shoulder_dist=%.3f < %.3f, subject too far, skip frame", shoulder_dist, (double)SHOULDER_DIST_MIN);
+        return POSTURE_TOO_FAR;
+    }
 
     // 预检①：双肩是全部判断的基准，连线近垂直属明显误检 → 本帧不判断
     if (fabsf(*out_shoulder_tilt) > SHOULDER_LINE_TILT_MAX) {

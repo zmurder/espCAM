@@ -12,6 +12,7 @@
 
 #include "udp_camera_client.h"
 #include "posture_model.h"
+#include "posture_sched.h"
 
 static const char* TAG = "UDP_CAMERA";
 
@@ -51,6 +52,9 @@ static bool s_socket_initialized = false;
 // 运行时目标 IP（网络序；0=未学习，用编译期默认）。32 位对齐写天然原子无需加锁；
 // 极端竞态（与 init 同时写）最坏丢一次更新，下个广播周期即恢复
 static in_addr_t s_server_ip = 0;
+
+// 发现/调度 socket（20003；任务外可见，供 posture_sched 主动推送状态）
+static int s_disc_socket = -1;
 
 // 更新发送目标 IP（发现任务调用；无变化时静默）
 static void set_server_ip(in_addr_t ip)
@@ -350,9 +354,28 @@ void send_posture_result_via_udp(const posture_output_t* output)
     }
 }
 
+// 供 posture_sched 主动推送：把调度状态文本发到学到的 PC IP:20003
+// （SNTP 同步完成时调用；无 socket 或未学到 PC 地址则跳过）
+void udp_sched_push_state(void)
+{
+    if (s_disc_socket < 0 || s_server_ip == 0) {
+        return;
+    }
+    char buf[160];
+    int n = posture_sched_build_state(buf, sizeof(buf));
+    struct sockaddr_in to;
+    memset(&to, 0, sizeof(to));
+    to.sin_family = AF_INET;
+    to.sin_port = htons(UDP_DISCOVERY_PORT);
+    to.sin_addr.s_addr = s_server_ip;
+    sendto(s_disc_socket, buf, n, 0, (struct sockaddr*)&to, sizeof(to));
+}
+
 /**
- * @brief UDP 自动发现监听任务：PC 端周期广播 DISCOVERY_REQ 到 20003，
- *        学习其源 IP 为图像/结果发送目标（变化时自动切换），并回复 ACK 供 PC 确认
+ * @brief UDP 20003 服务任务：自动发现 + 检测时间段设置/查询
+ *  - ESPCAM_DISCOVER            → 学习源 IP 为发送目标 + 回 ACK（自动发现，原有）
+ *  - ESPCAM_SCHED_GET           → 回当前调度状态
+ *  - ESPCAM_SCHED_SET n HH:MM … → 设置时间段（写 NVS）+ 回状态；解析失败回 ESPCAM_SCHED_ERR 原因
  */
 static void udp_discovery_task(void* pvParameters)
 {
@@ -374,9 +397,10 @@ static void udp_discovery_task(void* pvParameters)
         vTaskDelete(NULL);
         return;
     }
-    ESP_LOGI(TAG, "UDP 发现监听已启动 :%d（等待 PC 广播，自动学习目标 IP）", UDP_DISCOVERY_PORT);
+    s_disc_socket = sock;
+    ESP_LOGI(TAG, "UDP 发现/调度监听已启动 :%d（等待 PC 广播，自动学习目标 IP）", UDP_DISCOVERY_PORT);
 
-    char rx[32];
+    char rx[160];
     while (1) {
         struct sockaddr_in src;
         socklen_t src_len = sizeof(src);
@@ -390,6 +414,26 @@ static void udp_discovery_task(void* pvParameters)
             set_server_ip(src.sin_addr.s_addr);  // 学习 PC 的 IP（已相同则静默）
             sendto(sock, DISCOVERY_ACK, strlen(DISCOVERY_ACK), 0,
                    (struct sockaddr*)&src, sizeof(src));
+        }
+        else if (strncmp(rx, "ESPCAM_SCHED_GET", 16) == 0) {
+            char buf[160];
+            int len = posture_sched_build_state(buf, sizeof(buf));
+            sendto(sock, buf, len, 0, (struct sockaddr*)&src, sizeof(src));
+        }
+        else if (strncmp(rx, "ESPCAM_SCHED_SET", 16) == 0) {
+            char err[48] = "";
+            if (!posture_sched_parse_set(rx + 16, err, sizeof(err))) {
+                // 失败：显式回错误原因（设置未生效、NVS 未动），PC 端能明确感知
+                ESP_LOGW(TAG, "SCHED_SET 解析失败(%s): %s", err, rx);
+                char ebuf[80];
+                int elen = snprintf(ebuf, sizeof(ebuf), "ESPCAM_SCHED_ERR %s", err);
+                sendto(sock, ebuf, elen, 0, (struct sockaddr*)&src, sizeof(src));
+            }
+            else {
+                char buf[160];
+                int len = posture_sched_build_state(buf, sizeof(buf));
+                sendto(sock, buf, len, 0, (struct sockaddr*)&src, sizeof(src));  // 回状态即确认
+            }
         }
     }
 }

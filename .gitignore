@@ -80,3 +80,6 @@ Desktop.ini
 *.jpg
 *.png
 ref/*
+# Runtime data (posture report / captured frames)
+posture_history.db
+received_images/
