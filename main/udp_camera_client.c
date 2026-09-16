@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <netdb.h>
@@ -7,12 +8,19 @@
 #include "esp_camera.h"
 #include "esp_wifi.h"
 #include "esp_timer.h"
+#include "esp_system.h"
+#include "esp_mac.h"
+#include "esp_app_format.h"
+#include "esp_http_client.h"
+#include "esp_ota_ops.h"
 #include "lwip/inet.h"
 #include "led.h"
 
 #include "udp_camera_client.h"
 #include "posture_model.h"
 #include "posture_sched.h"
+#include "time_sync.h"
+#include "app_version.h"
 
 static const char* TAG = "UDP_CAMERA";
 
@@ -371,11 +379,181 @@ void udp_sched_push_state(void)
     sendto(s_disc_socket, buf, n, 0, (struct sockaddr*)&to, sizeof(to));
 }
 
+// ---------- OTA 固件升级（局域网 HTTP，地址由 PC 广播动态下发）----------
+
+static volatile bool s_ota_running = false;
+
+// 经 20003 通道向已学习 IP 推送一行文本（OTA 进度/结果）
+static void push_disc_text(const char* text)
+{
+    if (s_disc_socket < 0 || s_server_ip == 0) {
+        return;
+    }
+    struct sockaddr_in to;
+    memset(&to, 0, sizeof(to));
+    to.sin_family = AF_INET;
+    to.sin_port = htons(UDP_DISCOVERY_PORT);
+    to.sin_addr.s_addr = s_server_ip;
+    sendto(s_disc_socket, text, strlen(text), 0, (struct sockaddr*)&to, sizeof(to));
+}
+
+bool udp_ota_in_progress(void)
+{
+    return s_ota_running;
+}
+
 /**
- * @brief UDP 20003 服务任务：自动发现 + 检测时间段设置/查询
- *  - ESPCAM_DISCOVER            → 学习源 IP 为发送目标 + 回 ACK（自动发现，原有）
- *  - ESPCAM_SCHED_GET           → 回当前调度状态
- *  - ESPCAM_SCHED_SET n HH:MM … → 设置时间段（写 NVS）+ 回状态；解析失败回 ESPCAM_SCHED_ERR 原因
+ * @brief OTA 下载任务：HTTP 流式下载 → 写入另一 app 分区 → 校验 → 切换启动分区 → 重启。
+ *        URL 由 PC 经 20003 广播下发（IP 动态，无需固定）；期间推理照常（共享带宽，下载稍慢）。
+ */
+static void ota_update_task(void* arg)
+{
+    char* url = (char*)arg;
+    // 注意：s_ota_running 已在命令处理分支置位（xTaskCreate 之前），任务体内不再置位
+    static char rbuf[4096];  // 下载缓冲（放 BSS，避免大栈）
+    esp_http_client_handle_t client = NULL;
+    esp_ota_handle_t ota_handle = 0;
+    esp_err_t err = ESP_FAIL;
+    int total = 0;
+    int64_t clen = 0;
+
+    ESP_LOGI(TAG, "OTA: 开始下载 %s", url);
+    // SoftAP+STA 并发共存会拖累 STA 下行吞吐（AP beacon/管理帧占空口、驱动收发竞争）：
+    // 下载前切纯 STA。重启进新固件后 app_main 会重新建 APSTA（完整恢复）；
+    // 下载失败也保持纯 STA 继续检测（热点暂缺，重启即恢复）
+    if (esp_wifi_stop() == ESP_OK) {
+        if (esp_wifi_set_mode(WIFI_MODE_STA) == ESP_OK) {
+            esp_wifi_start();
+            esp_wifi_set_ps(WIFI_PS_NONE);  // 重启 WiFi 后再设一次（防回默认省电）
+            vTaskDelay(pdMS_TO_TICKS(3000));  // 等 STA 重连拿到 IP
+            ESP_LOGI(TAG, "OTA: 已切纯 STA（SoftAP 暂停，重启后恢复）");
+        }
+        else {
+            esp_wifi_start();  // 切换失败：按原 APSTA 启动，不阻塞 OTA
+        }
+    }
+    wifi_ap_record_t ap_info;
+    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+        // RSSI 诊断：> -60 很好，-60~-70 良好，-70~-80 一般，< -80 弱（低速调制，吞吐骤降）
+        ESP_LOGI(TAG, "OTA: WiFi 信号 %d dBm（> -70 正常）", ap_info.rssi);
+    }
+    do {
+        esp_http_client_config_t cfg = {
+            .url = url,
+            .timeout_ms = 15000,
+        };
+        client = esp_http_client_init(&cfg);
+        if (client == NULL) {
+            ESP_LOGE(TAG, "OTA: http client 初始化失败");
+            break;
+        }
+        err = esp_http_client_open(client, 0);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "OTA: 连接失败: %s", esp_err_to_name(err));
+            break;
+        }
+        clen = esp_http_client_fetch_headers(client);
+        int status = esp_http_client_get_status_code(client);
+        if (status != 200 || clen <= 0) {
+            ESP_LOGE(TAG, "OTA: HTTP 状态 %d，长度 %lld（固件不存在？）", status, (long long)clen);
+            err = ESP_FAIL;
+            break;
+        }
+        const esp_partition_t* part = esp_ota_get_next_update_partition(NULL);
+        if (part == NULL) {
+            ESP_LOGE(TAG, "OTA: 找不到可写的 app 分区（分区表无 ota 槽？）");
+            err = ESP_FAIL;
+            break;
+        }
+        err = esp_ota_begin(part, OTA_SIZE_UNKNOWN, &ota_handle);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "OTA: esp_ota_begin 失败: %s", esp_err_to_name(err));
+            break;
+        }
+        int last_log = 0;
+        int64_t net_us = 0, flash_us = 0;  // 网络 read / flash 写累计耗时（诊断下载慢在哪一侧）
+        while (true) {
+            int64_t t0 = esp_timer_get_time();
+            int n = esp_http_client_read(client, rbuf, sizeof(rbuf));
+            net_us += esp_timer_get_time() - t0;
+            if (n == 0) {
+                break;  // 下完（content-length 已满）
+            }
+            if (n < 0) {
+                ESP_LOGE(TAG, "OTA: 下载中断（超时/网络断开）");
+                err = ESP_FAIL;
+                break;
+            }
+            t0 = esp_timer_get_time();
+            err = esp_ota_write(ota_handle, rbuf, n);  // 首块会校验镜像头（magic）
+            flash_us += esp_timer_get_time() - t0;
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "OTA: esp_ota_write 失败: %s", esp_err_to_name(err));
+                break;
+            }
+            total += n;
+            if (total - last_log >= 256 * 1024) {  // 每 256KB：串口日志 + 推送 PC 显示进度
+                ESP_LOGI(TAG, "OTA: 进度 %d/%lld KB（累计等待网络 %lld ms / 写 flash %lld ms）",
+                         total / 1024, (long long)(clen / 1024), (long long)(net_us / 1000), (long long)(flash_us / 1000));
+                char prog[56];
+                int plen = snprintf(prog, sizeof(prog), "ESPCAM_OTA_PROGRESS %d %lld", total, (long long)clen);
+                push_disc_text(prog);
+                last_log = total;
+            }
+        }
+        if (err != ESP_OK) {
+            break;
+        }
+        if (total != (int)clen) {
+            ESP_LOGE(TAG, "OTA: 长度不符 已收 %d 应为 %lld", total, (long long)clen);
+            err = ESP_FAIL;
+            break;
+        }
+        err = esp_ota_end(ota_handle);  // 校验镜像完整性
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "OTA: esp_ota_end 失败: %s（镜像校验未过）", esp_err_to_name(err));
+            esp_ota_abort(ota_handle);  // end 失败后须显式 abort 释放
+            ota_handle = 0;
+            break;
+        }
+        ota_handle = 0;  // 成功：handle 已被消费，失败路径不可再 abort
+        err = esp_ota_set_boot_partition(part);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "OTA: 切换启动分区失败: %s", esp_err_to_name(err));
+            break;
+        }
+        ESP_LOGI(TAG, "OTA: 完成，共 %d KB，600ms 后重启进入新固件（重启后 ACK 带新版本号）", total / 1024);
+        push_disc_text("ESPCAM_OTA_DONE");
+        if (client != NULL) {
+            esp_http_client_cleanup(client);
+        }
+        free(url);
+        vTaskDelay(pdMS_TO_TICKS(600));  // 等 UDP 发出再重启
+        esp_restart();
+        return;  // 不会执行到这
+    } while (0);
+
+    // 失败路径：清理并通知 PC（当前固件继续运行，不受影响）
+    if (ota_handle != 0 && err != ESP_OK) {
+        esp_ota_abort(ota_handle);
+    }
+    if (client != NULL) {
+        esp_http_client_cleanup(client);
+    }
+    char emsg[64];
+    snprintf(emsg, sizeof(emsg), "ESPCAM_OTA_ERR %s", esp_err_to_name(err));
+    push_disc_text(emsg);
+    free(url);
+    s_ota_running = false;
+    vTaskDelete(NULL);
+}
+
+/**
+ * @brief UDP 20003 服务任务：自动发现 + 检测时间段设置/查询 + OTA 触发
+ *  - ESPCAM_DISCOVER              → 学习源 IP 为发送目标 + 回 "ESPCAM_ACK <版本号>"
+ *  - ESPCAM_SCHED_GET             → 回当前调度状态
+ *  - ESPCAM_SCHED_SET n HH:MM …   → 设置时间段（写 NVS）+ 回状态；解析失败回 ESPCAM_SCHED_ERR 原因
+ *  - ESPCAM_OTA_START http://…    → 回 ESPCAM_OTA_STARTED 并启动下载任务（PC 的 IP 动态）
  */
 static void udp_discovery_task(void* pvParameters)
 {
@@ -398,27 +576,73 @@ static void udp_discovery_task(void* pvParameters)
         return;
     }
     s_disc_socket = sock;
+    // 接收超时：无 PC 流量时循环也能 1s 一转，轮询对时事件（见下 time_sync_pop_event）
+    struct timeval rto = { .tv_sec = 1, .tv_usec = 0 };
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &rto, sizeof(rto));
     ESP_LOGI(TAG, "UDP 发现/调度监听已启动 :%d（等待 PC 广播，自动学习目标 IP）", UDP_DISCOVERY_PORT);
 
     char rx[160];
     while (1) {
+        // SNTP 对时回调运行在 lwIP tcpip_thread 上下文，不能直接 sendto（自等待死锁，
+        // 会挂起之后所有 socket 操作）——回调只置标志，由本任务在此取走并推送状态到 PC
+        if (time_sync_pop_event()) {
+            udp_sched_push_state();
+        }
         struct sockaddr_in src;
         socklen_t src_len = sizeof(src);
         ssize_t n = recvfrom(sock, rx, sizeof(rx) - 1, 0, (struct sockaddr*)&src, &src_len);
         if (n <= 0) {
-            vTaskDelay(pdMS_TO_TICKS(100));
-            continue;
+            continue;  // 1s 接收超时（已含等待），转回循环顶部继续轮询
         }
         rx[n] = '\0';
         if (strcmp(rx, DISCOVERY_REQ) == 0) {
             set_server_ip(src.sin_addr.s_addr);  // 学习 PC 的 IP（已相同则静默）
-            sendto(sock, DISCOVERY_ACK, strlen(DISCOVERY_ACK), 0,
-                   (struct sockaddr*)&src, sizeof(src));
+            // ACK 附带设备 ID（WiFi MAC 后 3 字节 hex，多设备区分）+ 版本号 + ELF SHA256 前 8 位
+            // （PC 维护设备表：逐台对比 ota/ 固件 sha 决定是否升级）
+            char ack[80];
+            char sha8[9];
+            uint8_t mac[6];
+            esp_read_mac(mac, ESP_MAC_WIFI_STA);
+            esp_app_get_elf_sha256(sha8, sizeof(sha8));
+            int alen = snprintf(ack, sizeof(ack), "ESPCAM_ACK %02x%02x%02x %s %s",
+                                mac[3], mac[4], mac[5], APP_VERSION, sha8);
+            sendto(sock, ack, alen, 0, (struct sockaddr*)&src, sizeof(src));
         }
         else if (strncmp(rx, "ESPCAM_SCHED_GET", 16) == 0) {
             char buf[160];
             int len = posture_sched_build_state(buf, sizeof(buf));
             sendto(sock, buf, len, 0, (struct sockaddr*)&src, sizeof(src));
+        }
+        else if (strncmp(rx, "ESPCAM_OTA_START ", 17) == 0) {
+            const char* url = rx + 17;
+            if (strlen(url) < 10) {
+                sendto(sock, "ESPCAM_OTA_ERR bad url", 22, 0, (struct sockaddr*)&src, sizeof(src));
+            }
+            else if (s_ota_running) {
+                sendto(sock, "ESPCAM_OTA_ERR busy", 19, 0, (struct sockaddr*)&src, sizeof(src));
+            }
+            else {
+                set_server_ip(src.sin_addr.s_addr);  // 升级期间推送进度用
+                char* u = malloc(strlen(url) + 1);  // 任务自行 free
+                if (u == NULL) {
+                    sendto(sock, "ESPCAM_OTA_ERR oom", 19, 0, (struct sockaddr*)&src, sizeof(src));
+                }
+                else {
+                    strcpy(u, url);
+                    // 置位必须在 xTaskCreate 之前：本任务串行处理 20003 命令，双份广播包
+                    // 第二份到达时必然看到 true → 回 busy。若等任务体第一行才置位，任务
+                    // 未及调度、第二份已通过检查 → 两个下载任务并发写同一分区 → 镜像损坏
+                    s_ota_running = true;
+                    if (xTaskCreate(ota_update_task, "ota_update", 8192, u, 4, NULL) != pdPASS) {
+                        s_ota_running = false;
+                        free(u);
+                        sendto(sock, "ESPCAM_OTA_ERR oom", 19, 0, (struct sockaddr*)&src, sizeof(src));
+                    }
+                    else {
+                        sendto(sock, "ESPCAM_OTA_STARTED", 18, 0, (struct sockaddr*)&src, sizeof(src));
+                    }
+                }
+            }
         }
         else if (strncmp(rx, "ESPCAM_SCHED_SET", 16) == 0) {
             char err[48] = "";

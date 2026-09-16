@@ -54,3 +54,9 @@ CONFIG_LOG_TIMESTAMP_SOURCE_SYSTEM=y
 
 # SNTP 服务器数量：time_sync.c 配置了主备两台（ntp.aliyun.com + pool.ntp.org）
 CONFIG_LWIP_SNTP_MAX_SERVERS=2
+
+# TCP 接收窗口调大（默认 5760=4×MSS）：小窗口 + Windows 发送端延迟确认会停等式传输，
+# HTTP/OTA 下载被锁在 ~10-20KB/s；57600（40×MSS）后局域网吞吐可达 MB/s 量级
+CONFIG_LWIP_TCP_WND_DEFAULT=57600
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=57600
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=32

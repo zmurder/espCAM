@@ -1,6 +1,7 @@
 #ifndef UDP_CAMERA_CLIENT_H
 #define UDP_CAMERA_CLIENT_H
 
+#include <stdbool.h>
 #include "esp_err.h"
 #include "esp_camera.h"
 #include "posture_model.h"
@@ -49,5 +50,10 @@ uint32_t get_total_frames(void);
  * @brief 发送姿态检测结果通过UDP
  */
 void send_posture_result_via_udp(const posture_output_t* output);
+
+/**
+ * @brief OTA 下载任务是否进行中（推理任务据此暂停：省出 WiFi 带宽/flash 总线给下载）
+ */
+bool udp_ota_in_progress(void);
 
 #endif /* UDP_CAMERA_CLIENT_H */

@@ -20,6 +20,8 @@ endif()
 # 嵌入文件列表（模型 + 测试图）
 set(embed_files ${MODEL_FILE_PATH} ${TEST_IMAGE_PATH})
 
+# 注意：不写 REQUIRES/PRIV_REQUIRES —— main 组件此时会自动依赖构建中全部组件
+# （含 OTA 所需 esp_http_client/app_update），显式列出反而会关闭该机制导致头文件缺失
 idf_component_register(SRCS  "app_main.c" "cam.c" "udp_camera_client.c" "wifi_config_manager.c" "wifi_manager.c" "led.c" "dns_server.c" "audio_player.c" "time_sync.c" "posture_sched.c" "posture_model.cpp"
                     INCLUDE_DIRS "."
                     EMBED_FILES ${embed_files})

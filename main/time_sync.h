@@ -23,6 +23,12 @@ void time_sync_init(void);
  */
 bool time_sync_is_done(void);
 
+/**
+ * @brief 取走"刚完成对时"事件（SNTP 回调只置标志，不能在其 tcpip_thread 上下文
+ *        直接 sendto——会自等待死锁）；返回 true 时调用方应推送调度状态到 PC
+ */
+bool time_sync_pop_event(void);
+
 #ifdef __cplusplus
 }
 #endif

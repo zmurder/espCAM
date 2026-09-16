@@ -245,5 +245,8 @@ void posture_sched_notify_time_synced(void)
     ESP_LOGI(TAG, "Time synced, schedule now in effect:");
     posture_sched_log_slots();
     s_last_active = -1;  // 重播当前状态
-    udp_sched_push_state();  // 主动推送状态到 PC（20003）
+    // 注意：这里不能调 udp_sched_push_state()（sendto）——本函数运行在 SNTP 回调
+    // 即 lwIP tcpip_thread 上下文，sendto 要等 tcpip_thread 处理，自等待 = 死锁，
+    // 之后所有 socket 操作全部挂起。对时后的状态推送改由 20003 任务轮询
+    // time_sync_pop_event() 触发（见 udp_discovery_task）。
 }

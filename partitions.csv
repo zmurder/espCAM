@@ -1,4 +1,8 @@
-# Name,   Type, SubType, Offset,  Size, Flags
-factory,  app,  factory,  0x10000,  4M,
-nvs,      data, nvs,      ,        0x6000,
-phy,      data, phy,      ,        0x4000,
+# Name,   Type, SubType, Offset,   Size,      Flags
+# 双 OTA 分区（ota_0/ota_1 各 5MB）+ otadata：HTTP OTA 写另一槽，重启切换，坏镜像自动回滚
+nvs,      data, nvs,     0x9000,   0x6000,
+otadata,  data, ota,     0xf000,   0x2000,
+phy,      data, phy,     0x11000,  0x4000,
+ota_0,    app,  ota_0,   0x20000,  0x500000,
+ota_1,    app,  ota_1,   ,         0x500000,
+storage,  data, fat,     ,         0x5E0000,

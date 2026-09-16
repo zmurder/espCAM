@@ -5,6 +5,8 @@
  * and configuration portal support.
  */
 
+#include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "esp_err.h"
@@ -32,8 +34,17 @@
 #include "audio_player.h"
 #include "time_sync.h"
 #include "posture_sched.h"
+#include "app_version.h"
 
 static const char* TAG = "APP_MAIN";
+
+// 每条日志前加版本前缀：ESP_LOG* 宏最终经此 vprintf 钩子输出（不影响 printf 本身；
+// 这里调用的是 newlib vprintf，不会再进本钩子，无递归）
+static int log_with_version(const char* fmt, va_list ap)
+{
+    fputs("[" APP_VERSION "] ", stdout);
+    return vprintf(fmt, ap);
+}
 
 #define WIFI_CONFIG_BUTTON_GPIO 14
 
@@ -92,6 +103,11 @@ static void posture_inference_task(void* arg)
         // 检测时间段调度：窗口外不取帧不推理不发送（时间未同步/未设置时段时始终检测）
         if (!posture_sched_is_active()) {
             vTaskDelay(pdMS_TO_TICKS(5000));  // 低频轮询等待进窗（分钟级粒度足够）
+            continue;
+        }
+        // OTA 升级中暂停检测：不抢 WiFi 空口带宽、避免推理 flash 访问与擦写互斥，下载更快
+        if (udp_ota_in_progress()) {
+            vTaskDelay(pdMS_TO_TICKS(2000));  // 等下载完成（会重启进新固件，自动恢复）
             continue;
         }
 
@@ -171,6 +187,9 @@ static void posture_inference_task(void* arg)
 
 void app_main(void)
 {
+    esp_log_set_vprintf(log_with_version);  // 之后每条日志带 [版本号] 前缀
+    ESP_LOGI(TAG, "App version: %s", APP_VERSION);
+
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
@@ -220,6 +239,10 @@ void app_main(void)
 
     /* Start WiFi */
     ESP_ERROR_CHECK(esp_wifi_start());
+
+    // 关闭 WiFi 省电（默认 min-modem：beacon 间隔外收不到 TCP，HTTP/OTA 吞吐仅 KB/s 级）
+    // 设备常电供电，功耗不敏感；PS_NONE 后局域网吞吐可到 MB/s 量级
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
 
     // 初始化WiFi配置管理器
     ESP_ERROR_CHECK(wifi_config_manager_init(WIFI_CONFIG_BUTTON_GPIO, wifi_get_event_group(), esp_netif_ap));
