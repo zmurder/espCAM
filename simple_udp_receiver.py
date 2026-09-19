@@ -16,6 +16,7 @@ ESP32 坐姿检测 — 图像 + 检测结果 UDP 接收器
 
 import http.server
 import io
+import json
 import math
 import os
 import re
@@ -26,7 +27,7 @@ import struct
 import sys
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from PIL import Image, ImageDraw
 
@@ -46,6 +47,49 @@ DRAW_KEYPOINTS = False
 
 # 保存频率：每收到 N 帧图像只保存 1 帧（1=每帧都存）。跳过的帧不解码不落盘，
 SAVE_EVERY_N = 10
+
+# 以上两项可运行中修改（img 命令 / Web 图像保存卡），支持"全部设备默认 + 按设备覆盖"
+# （与检测时段记忆同一套模型），持久化到 recv_settings.json；无该文件时用上面的默认值
+IMG_SETTINGS_FILE = "recv_settings.json"
+# people=仅保存有人帧：设备最近结果连续 IMG_NOBODY_SKIP_N 帧无效（没人/太远/不可信）→ 停止保存
+IMG_NOBODY_SKIP_N = 50
+_img_cfg = {"default": {"draw_kp": DRAW_KEYPOINTS, "save_n": SAVE_EVERY_N, "people": False}, "devices": {}}
+
+
+def _load_img_cfg():
+    try:
+        with open(IMG_SETTINGS_FILE, encoding="utf-8") as f:
+            m = json.load(f)
+        d = m.get("default")
+        if isinstance(d, dict):
+            if isinstance(d.get("draw_kp"), bool):
+                _img_cfg["default"]["draw_kp"] = d["draw_kp"]
+            if isinstance(d.get("save_n"), int) and d["save_n"] >= 0:
+                _img_cfg["default"]["save_n"] = d["save_n"]
+            if isinstance(d.get("people"), bool):
+                _img_cfg["default"]["people"] = d["people"]
+        if isinstance(m.get("devices"), dict):
+            _img_cfg["devices"] = m["devices"]
+    except (OSError, ValueError):
+        pass
+
+
+def _save_img_cfg():
+    try:
+        with open(IMG_SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(_img_cfg, f)
+    except OSError as e:
+        print(f"[img] 设置保存失败: {e}")
+
+
+def _img_cfg_for(devid):
+    """该设备生效的图像保存设置：默认 + 专属覆盖（未覆盖字段回退默认）"""
+    merged = dict(_img_cfg["default"])
+    merged.update(_img_cfg["devices"].get(devid) or {})
+    return merged
+
+
+_load_img_cfg()
 
 # 与 ESP judge_posture 一致的阈值（4 条任意成立即不良；左上角显示参考用）
 EYE_FORWARD_RATIO_MIN = 1.5  # 条件1：眼肩垂直距离/双眼距离 < 此值 → 前倾（需据正常坐姿标定）
@@ -74,6 +118,35 @@ DISCOVERY_REQ = b"ESPCAM_DISCOVER"  # ESP 应答 "ESPCAM_ACK <版本号>"（版�
 
 POSTURE_SCHED_SLOTS = ["09:00-11:30", "14:00-21:00"]  # 例: ["09:00-11:30", "14:00-18:00"]
 SCHED_GET = b"ESPCAM_SCHED_GET"
+
+# 检测时段的按设备记忆（sched_per_dev.json）：default=全部设备统一设置（None=不下发），
+# devices=各设备专属设置（覆盖 default）。手动"全部设备"设置会统一并清掉专属；
+# 启动时 default 广播一次 + 对有专属设置的在线设备单播覆盖，设备重新上线（ACK）自动补发。
+# 没有记忆文件时 default 取 POSTURE_SCHED_SLOTS（兼容旧语义）
+SCHED_MEM_FILE = "sched_per_dev.json"
+
+
+def _load_sched_mem():
+    def _norm(x):  # JSON 读回的 [[s,e],...] → [(s,e),...]（与内存新建一致）
+        return [tuple(p) for p in x] if isinstance(x, list) else x
+
+    try:
+        with open(SCHED_MEM_FILE, encoding="utf-8") as f:
+            m = json.load(f)
+        if isinstance(m, dict) and isinstance(m.get("devices"), dict):
+            return {"default": _norm(m.get("default")), "devices": {k: _norm(v) for k, v in m["devices"].items()},
+                    "alert_default": m.get("alert_default", True),       # 不良提醒模式默认（True=连续播）
+                    "alert_devices": {k: bool(v) for k, v in m.get("alert_devices", {}).items()}}  # 各设备专属
+    except (OSError, ValueError):
+        pass
+    # 无记忆文件：POSTURE_SCHED_SLOTS 常量作 default（解析成分钟元组，旧语义不变）
+    try:
+        dflt = _parse_slots_arg(",".join(POSTURE_SCHED_SLOTS)) if POSTURE_SCHED_SLOTS is not None else None
+    except ValueError as e:
+        print(f"[sched] POSTURE_SCHED_SLOTS 配置错误: {e}")
+        dflt = None
+    return {"default": dflt, "devices": {}, "alert_default": True, "alert_devices": {}}
+
 
 # 坐姿历史库（SQLite）：result_receiver 逐帧写入 ts/result/ratio，
 # 供 posture_report.py 查询统计与绘制趋势图（kps 不入库，体积小且趋势分析用不到）
@@ -144,16 +217,9 @@ def _slots_to_set_msg(slots):
     return f"ESPCAM_SCHED_SET {len(slots)} " + " ".join(times)
 
 
-def _build_sched_set():
-    """POSTURE_SCHED_SLOTS → 本地校验后构造 ESPCAM_SCHED_SET 文本；None=不下发；配置错打印后不下发"""
-    if POSTURE_SCHED_SLOTS is None:
-        return None
-    try:
-        slots = _parse_slots_arg(",".join(POSTURE_SCHED_SLOTS))
-    except ValueError as e:
-        print(f"[sched] POSTURE_SCHED_SLOTS 配置错误，未下发: {e}")
-        return None
-    return _slots_to_set_msg(slots)
+_sched_mem = _load_sched_mem()  # 放在 _parse_slots_arg 之后（无记忆文件时用它解析常量）
+_sched_synced = set()  # 本轮进程内已补发专属时段的设备（重启 PC 才会再补发）
+_alert_synced = set()  # 本轮进程内已补发专属提醒模式的设备（同上）
 
 
 _disc_sock = None  # discovery socket（broadcaster 创建后共享给主线程命令下发）
@@ -164,7 +230,8 @@ _devices_order = []  # ota list 打印时的序号顺序（ota <序号> 引用�
 _ota_httpd = None  # 本地 OTA HTTP 服务（懒启动一次）
 _ota_state = {"watch": True}  # 自动检测总开关（fails 按设备记在 _devices 里）
 # OTA 批次（逐台串行：一台确认/失败/超时后再推下一台，避免多台同时下载挤占 WiFi 带宽）
-_ota_batch = {"queue": [], "current": None, "before_sha": None, "deadline": 0.0}
+_ota_batch = {"queue": [], "current": None, "before_sha": None, "deadline": 0.0,
+              "phase": None, "progress": None}  # phase: push(已触发)→download(下载中)→verify(等重启确认)；progress: {cur,tot,t}
 OTA_STEP_TIMEOUT = 300  # 单台：触发 → 下载 → DONE 的上限（秒）
 OTA_VERIFY_TIMEOUT = 90  # 单台：DONE 重启 → ACK 上报新 sha 的上限（秒）
 
@@ -265,6 +332,8 @@ def _ota_advance():
         if time.time() > b["deadline"]:
             print(f"[ota] 设备 {b['current']} 升级超时，跳过（继续下一台）")
             b["current"] = None
+            b["phase"] = None
+            b["progress"] = None
         else:
             return
     if not b["queue"]:
@@ -276,8 +345,11 @@ def _ota_advance():
     b["current"] = devid
     b["before_sha"] = d["sha8"]
     b["deadline"] = time.time() + OTA_STEP_TIMEOUT
+    b["phase"] = "push"
+    b["progress"] = None
     if not _trigger_one(devid):
         b["current"] = None
+        b["phase"] = None
 
 
 def _devid_by_ip(ip):
@@ -286,16 +358,6 @@ def _devid_by_ip(ip):
         if d.get("ip") == ip:
             return k
     return ip
-
-
-def _dev_ver_summary():
-    """[sched] 行尾的版本摘要：在线设备固件版本去重（单台一个版本，多台逗号分隔）"""
-    now = time.time()
-    vers = []
-    for d in _devices.values():
-        if d.get("ver") and now - d.get("last_seen", 0) < 30 and d["ver"] not in vers:
-            vers.append(d["ver"])
-    return "| ESP 固件 " + ",".join(vers) if vers else ""
 
 
 def _ota_load():
@@ -388,8 +450,7 @@ def _ota_cmd(arg=""):
     want = _bin_sha8(OTA_BIN)
     now = time.time()
     if arg in ("", "all", "a"):
-        targets = [k for k, d in _devices.items()
-                   if d.get("sha8") and d["sha8"] != want and now - d.get("last_seen", 0) < 30]
+        targets = [k for k, d in _devices.items() if d.get("sha8") and d["sha8"] != want and now - d.get("last_seen", 0) < 30]
         if not targets:
             known = sum(1 for d in _devices.values() if d.get("sha8"))
             print(f"[ota] 无待升级设备（已应答的 {known} 台均在运行最新固件）")
@@ -408,27 +469,122 @@ def _ota_cmd(arg=""):
     _ota_advance()
 
 
-def _send_sched_set(slots):
-    """经 20003 通道广播下发 ESPCAM_SCHED_SET（ESP 回 SCHED_STATE 确认 / SCHED_ERR 报错）"""
+def _send_sched_set(slots, devid=None):
+    """经 20003 通道下发 ESPCAM_SCHED_SET（ESP 回 SCHED_STATE 确认 / SCHED_ERR 报错）。
+    devid=None 广播全部设备；否则单播到该设备当前 IP（只改它的 NVS，其余设备不受影响）"""
     if _disc_sock is None:
         print("[sched] 发现通道未就绪，稍后再试")
         return
-    msg = _slots_to_set_msg(slots)
-    for t in _broadcast_targets():
+    msg = _slots_to_set_msg(slots).encode()
+    targets = _broadcast_targets() if devid is None else None
+    if devid is not None:
+        d = _devices.get(devid)
+        if not d or not d.get("ip"):
+            print(f"[sched] 设备 {devid} 不在线，无法单播（先 ota list 查看）")
+            return
+        targets = [(d["ip"], DISCOVERY_PORT)]
+    for t in targets:
         try:
-            _disc_sock.sendto(msg.encode(), t)
+            _disc_sock.sendto(msg, t)
         except OSError:
             pass
     desc = ", ".join(f"{s // 60:02d}:{s % 60:02d}-{e // 60:02d}:{e % 60:02d}" for s, e in slots)
-    print(f"[sched] 已下发设置: {desc or '全天检测(清空)'}，等待 ESP 确认...")
+    who = "全部设备" if devid is None else devid
+    print(f"[sched] 已下发设置({who}): {desc or '全天检测(清空)'}，等待 ESP 确认...")
 
 
-_sched_last = {"text": "", "t": 0.0}  # 上次 [sched] 打印（内容+时刻）：相同内容 60s 一条心跳，不每 2s 刷屏
+def _save_sched_mem():
+    try:
+        with open(SCHED_MEM_FILE, "w", encoding="utf-8") as f:
+            json.dump(_sched_mem, f)
+    except OSError as e:
+        print(f"[sched] 记忆文件写入失败（本次设置仍已下发）: {e}")
 
 
-def _handle_sched_state(data):
+def _sched_set_memory(devid, slots):
+    """把一次设置记入 sched_per_dev.json（devid=None 表示全部设备：更新 default 并清掉各设备
+    专属——统一后专属失效；指定设备只写自己的条目）。下次启动 default 广播后按条目单播覆盖"""
+    if devid is None:
+        _sched_mem["default"] = slots
+        _sched_mem["devices"].clear()
+        _sched_synced.clear()
+    else:
+        _sched_mem["devices"][devid] = slots
+        _sched_synced.discard(devid)  # 让 ACK 补发路径重新同步一次
+    _save_sched_mem()
+
+
+_ALERT_DESC = {True: "连续播", False: "只播一次"}
+
+
+def _send_alert_set(val, devid=None):
+    """下发 ESPCAM_ALERT_SET（devid=None 广播全部；否则单播该设备），ESP 写 NVS 后回 ALERT_STATE 确认"""
+    if _disc_sock is None:
+        print("[alert] 发现通道未就绪，稍后再试")
+        return
+    msg = f"ESPCAM_ALERT_SET {1 if val else 0}".encode()
+    targets = _broadcast_targets() if devid is None else None
+    if devid is not None:
+        d = _devices.get(devid)
+        if not d or not d.get("ip"):
+            print(f"[alert] 设备 {devid} 不在线，无法单播（先 ota list 查看）")
+            return
+        targets = [(d["ip"], DISCOVERY_PORT)]
+    for t in targets:
+        try:
+            _disc_sock.sendto(msg, t)
+        except OSError:
+            pass
+    who = "全部设备" if devid is None else devid
+    print(f"[alert] 已下发({_ALERT_DESC[val]})({who})，等待 ESP 确认...")
+
+
+def _alert_set_memory(devid, val):
+    """提醒模式记忆（与时段同一份 sched_per_dev.json）：全部=统一默认并清专属；单台=只写自己"""
+    if devid is None:
+        _sched_mem["alert_default"] = val
+        _sched_mem["alert_devices"].clear()
+        _alert_synced.clear()
+    else:
+        _sched_mem["alert_devices"][devid] = val
+        _alert_synced.discard(devid)
+    _save_sched_mem()
+
+
+def _alert_cmd(arg=""):
+    """不良提醒模式命令（键盘与 Web 共用）：'' = 概览；repeat=连续播 / once=只播一次；
+    @<序号|ID> repeat|once = 只改该设备。设置写 ESP NVS（断电保持）并记入 sched_per_dev.json"""
+    usage = "[alert] 用法: alert（查看） | alert repeat|once（全部设备） | alert @<序号|ID> repeat|once（指定设备）"
+    if not arg:
+        print(f"[alert] 默认(全部设备): {_ALERT_DESC[_sched_mem['alert_default']]}（repeat=连续播, once=只播一次）")
+        for k, v in _sched_mem["alert_devices"].items():
+            print(f"[alert]   {k}（专属）: {_ALERT_DESC[v]}")
+        for k, d in _devices.items():
+            if d.get("ip") and d.get("alert") is not None:
+                print(f"[alert]   {k} 在线生效: {_ALERT_DESC[d['alert']]}")
+        return
+    devid = None
+    if arg.startswith("@"):
+        head, _, rest = arg.partition(" ")
+        devid = _resolve_device(head[1:].lower())
+        if not devid:
+            return
+        arg = rest.strip()
+    if arg not in ("repeat", "once"):
+        print(usage)
+        return
+    val = arg == "repeat"
+    _alert_set_memory(devid, val)
+    _send_alert_set(val, devid)
+
+
+_sched_last = {}  # devid → {"text","t"}：上次 [sched] 打印（内容+时刻）：相同内容 60s 一条心跳，不每 2s 刷屏
+
+
+def _handle_sched_state(data, devid):
     """解析 'ESPCAM_SCHED_STATE synced active n HH:MM HH:MM ...'；状态变化立即打印，
-    不变则每 60s 打一条心跳；行尾附 ESP 固件版本（PC 端随时可见当前版本）"""
+    不变则每 60s 打一条心跳（按设备去重，多设备互不干扰）；同时把时段/时间同步状态
+    存入设备表（Web 设备列表展示），行尾附该设备固件版本"""
     try:
         parts = data.decode(errors="ignore").split()
         synced, active, n = int(parts[1]), int(parts[2]), int(parts[3])
@@ -437,16 +593,23 @@ def _handle_sched_state(data):
             slots.append(f"{parts[4 + 2 * i]}-{parts[5 + 2 * i]}")
     except (IndexError, ValueError):
         return
-    desc = ", ".join(slots) if slots else "未设置(全天检测)"
+    desc = ", ".join(slots) if slots else "全天"
     sync_desc = "时间已同步" if synced else "时间未同步(暂全检测)"
     act_desc = "检测开启" if active else "检测暂停(时段外)"
-    ver_suffix = _dev_ver_summary()
-    line = f"检测时段: {desc} | ESP {sync_desc} | 当前{act_desc}{ver_suffix}"
+    d = _devices.get(devid)
+    if d is not None:
+        d["sched_desc"] = desc
+        d["sched_synced"] = bool(synced)
+        d["sched_active"] = bool(active)
+        d["sched_seen"] = time.time()
+    ver_suffix = f"| ESP 固件 {d['ver']}" if d and d.get("ver") else ""
+    ui_line = f"检测时段: {desc} | ESP {sync_desc} | 当前{act_desc}"
+    line = f"[{devid}] {ui_line}{ver_suffix}"
     now = time.time()
-    if line == _sched_last["text"] and now - _sched_last["t"] < 60:
+    last = _sched_last.get(devid)
+    if last and last["text"] == line and now - last["t"] < 60:
         return
-    _sched_last["text"] = line
-    _sched_last["t"] = now
+    _sched_last[devid] = {"text": line, "ui": ui_line, "t": now}
     print(f"[sched] {datetime.now().strftime('%H:%M:%S')} {line}")
 
 
@@ -460,15 +623,31 @@ def discovery_broadcaster():
     global _disc_sock
     _disc_sock = sock  # 暴露给主线程：交互命令 s 借此 socket 下发
     print(f"[discovery] 广播发现包 → :{DISCOVERY_PORT}（ESP32 将自动学习本机 IP）")
-    sched_set = _build_sched_set()
+    # 启动下发：default（全部设备统一，None=不下发）广播一次；有专属记忆的设备随后在 ACK 时单播覆盖
+    sched_set = None
+    if _sched_mem["default"] is not None:
+        try:
+            sched_set = _slots_to_set_msg(_sched_mem["default"])
+        except (ValueError, TypeError) as e:
+            print(f"[sched] 记忆的默认时段配置错误，未下发: {e}")
     if sched_set:
-        print(f"[sched] 下发检测时段设置: {POSTURE_SCHED_SLOTS}（将写入 ESP NVS）")
+        desc = ", ".join(f"{s // 60:02d}:{s % 60:02d}-{e // 60:02d}:{e % 60:02d}" for s, e in _sched_mem["default"])
+        print(f"[sched] 下发默认时段(全部设备): {desc or '全天检测(清空)'}（将写入 ESP NVS）")
+        if _sched_mem["devices"]:
+            print(f"[sched] 另有 {len(_sched_mem['devices'])} 台专属设置，将在其应答后单播覆盖")
+    # 启动下发：不良提醒模式默认值（同通道广播一次；有专属记忆的设备 ACK 后单播覆盖）
+    alert_set = f"ESPCAM_ALERT_SET {1 if _sched_mem['alert_default'] else 0}".encode()
+    print(f"[alert] 下发默认提醒模式(全部设备): {_ALERT_DESC[_sched_mem['alert_default']]}（将写入 ESP NVS）")
+    if _sched_mem["alert_devices"]:
+        print(f"[alert] 另有 {len(_sched_mem['alert_devices'])} 台专属设置，将在其应答后单播覆盖")
     first_round = True
     while True:
         for t in _broadcast_targets():
             try:
                 if first_round and sched_set:
                     sock.sendto(sched_set.encode(), t)  # 启动时下发设置（None=不下发）
+                if first_round:
+                    sock.sendto(alert_set, t)  # 启动时下发提醒模式默认值
                 sock.sendto(SCHED_GET, t)  # 每周期查询调度状态
                 sock.sendto(DISCOVERY_REQ, t)  # 保活：IP 变化 2s 内自动跟随
             except OSError:
@@ -510,30 +689,67 @@ def discovery_broadcaster():
                 if ver and ver != d["ver"]:
                     d["ver"] = ver
                     print(f"[version] {devid} 固件版本: {ver}")
+                # 第 5 段 = 不良提醒模式（旧固件无此段 → 保持 None，Web 显示"—"）
+                if len(parts) >= 5 and parts[4] in ("0", "1"):
+                    d["alert"] = parts[4] == "1"
                 # 批次确认：当前台 ACK 上报新 sha = 已重启进新固件，继续下一台
                 b = _ota_batch
                 if b["current"] == devid and b["before_sha"] and sha8 and sha8 != b["before_sha"]:
                     print(f"[ota] {devid} 批次完成，继续下一台")
                     b["current"] = None
+                    b["phase"] = None
+                    b["progress"] = None
                     _ota_advance()
                 _auto_ota_check(devid)
+                # 该设备有专属时段记忆且本进程内未同步 → 单播覆盖默认广播（重启/重新上线自动恢复）
+                if devid in _sched_mem["devices"] and devid not in _sched_synced:
+                    _sched_synced.add(devid)
+                    _send_sched_set(_sched_mem["devices"][devid], devid)
+                # 提醒模式专属记忆同理
+                if devid in _sched_mem["alert_devices"] and devid not in _alert_synced:
+                    _alert_synced.add(devid)
+                    _send_alert_set(_sched_mem["alert_devices"][devid], devid)
             elif data.startswith(b"ESPCAM_SCHED_STATE"):
-                _handle_sched_state(data)
+                _handle_sched_state(data, _devid_by_ip(addr[0]))
+            elif data.startswith(b"ESPCAM_ALERT_STATE"):
+                # ESPCAM_ALERT_STATE 0|1：ALERT_SET 的回执 / ALERT_GET 的应答（确认实际生效模式）
+                devid = _devid_by_ip(addr[0])
+                try:
+                    val = int(data.split()[1]) == 1
+                except (IndexError, ValueError):
+                    val = None
+                d = _devices.get(devid)
+                if d is not None and val is not None:
+                    if d.get("alert") != val:
+                        print(f"[alert] {devid} 提醒模式已生效: {_ALERT_DESC[val]}")
+                    d["alert"] = val
+            elif data.startswith(b"ESPCAM_ALERT_ERR"):
+                print(f"[alert] ESP 设置失败: {data.decode(errors='ignore')[17:].strip()}")
             elif data.startswith(b"ESPCAM_SCHED_ERR"):
                 print(f"[sched] ESP 设置失败: {data.decode(errors='ignore')[16:].strip()}")
             elif data == b"ESPCAM_OTA_STARTED":
-                print(f"[ota] {_devid_by_ip(addr[0])} 已开始下载固件（{datetime.now().strftime('%H:%M:%S')}）")
+                devid = _devid_by_ip(addr[0])
+                print(f"[ota] {devid} 已开始下载固件（{datetime.now().strftime('%H:%M:%S')}）")
+                if _ota_batch["current"] == devid:
+                    _ota_batch["phase"] = "download"
+                    _ota_batch["progress"] = None
             elif data.startswith(b"ESPCAM_OTA_PROGRESS"):
                 # ESP 每 256KB 推送一次：ESPCAM_OTA_PROGRESS <已收字节> <总字节>
                 try:
                     cur, tot = map(int, data.split()[1:3])
-                    print(f"[ota] {_devid_by_ip(addr[0])} 下载进度: {cur // 1024}/{tot // 1024} KB（{cur * 100 // tot}%）")
+                    devid = _devid_by_ip(addr[0])
+                    print(f"[ota] {devid} 下载进度: {cur // 1024}/{tot // 1024} KB（{cur * 100 // tot}%）")
+                    if _ota_batch["current"] == devid:
+                        _ota_batch["phase"] = "download"
+                        _ota_batch["progress"] = {"cur": cur, "tot": tot, "t": time.time()}
                 except (IndexError, ValueError):
                     pass
             elif data == b"ESPCAM_OTA_DONE":
                 devid = _devid_by_ip(addr[0])
                 print(f"[ota] {devid} 下载校验完成，即将重启（约 15s 后 ACK 带新版本）")
                 if _ota_batch["current"] == devid:
+                    _ota_batch["phase"] = "verify"
+                    _ota_batch["progress"] = None
                     _ota_batch["deadline"] = time.time() + OTA_VERIFY_TIMEOUT  # 转入重启确认阶段
             elif data.startswith(b"ESPCAM_OTA_ERR"):
                 emsg = data.decode(errors="ignore")[15:].strip()
@@ -544,6 +760,8 @@ def discovery_broadcaster():
                     print(f"[ota] {devid} 升级失败: {emsg}（当前固件继续运行）")
                     if _ota_batch["current"] == devid:
                         _ota_batch["current"] = None
+                        _ota_batch["phase"] = None
+                        _ota_batch["progress"] = None
                         _ota_advance()  # 失败即推进下一台
         _ota_advance()  # 批次推进（含超时检查）
         time.sleep(2)
@@ -552,7 +770,7 @@ def discovery_broadcaster():
 # 最新检测结果（result 线程写，image 线程读）
 latest = {"result": -1, "ratio": 0.0, "kps": []}
 lock = threading.Lock()
-frame_seq = 0  # 已收到的完整图像帧计数（SAVE_EVERY_N 抽稀保存用）
+frame_seq = {}  # devid → 已收到的完整图像帧计数（SAVE_EVERY_N 按设备独立抽稀；多设备合用一个计数会互相挤占）
 os.makedirs("received_images", exist_ok=True)
 
 
@@ -564,8 +782,13 @@ def _open_history_db():
             "CREATE TABLE IF NOT EXISTS posture_log ("
             "ts REAL PRIMARY KEY, "  # PC 本地时间（unix 秒，浮点）
             "result INTEGER NOT NULL, "  # 0-5，与 RESULT_TAG 对应
-            "ratio REAL)"  # 触发条件的比值（前倾判断依据）
+            "ratio REAL, "  # 触发条件的比值（前倾判断依据）
+            "devid TEXT)"  # 来源设备（WiFi MAC 后 3 字节 hex；多设备统计用）
         )
+        try:
+            db.execute("ALTER TABLE posture_log ADD COLUMN devid TEXT")  # 旧库迁移（列已存在则忽略）
+        except sqlite3.Error:
+            pass
         db.commit()
         return db
     except sqlite3.Error as e:
@@ -583,7 +806,7 @@ def result_receiver():
     print(f"[result] 监听 :{UDP_RESULT_PORT}" + (f"，历史记录 → {HISTORY_DB}" if db else ""))
     while True:
         try:
-            data, _ = sock.recvfrom(256)
+            data, addr = sock.recvfrom(256)
         except socket.timeout:
             continue
         # 1(tag) + 1(result) + 4(ratio) + 6*12(kps) = 78
@@ -592,12 +815,14 @@ def result_receiver():
         result = data[1]
         ratio = struct.unpack_from("<f", data, 2)[0]  # little-endian (ESP memcpy)
         kps = [struct.unpack_from("<fff", data, 6 + i * 12) for i in range(6)]
+        devid = _devid_by_ip(addr[0])  # 按源 IP 归属设备（多设备分开统计/日志过滤）
         with lock:
             latest.update(result=result, ratio=ratio, kps=kps)
-        print(f"[result] {RESULT_TAG.get(result, '?'):11s} ratio={ratio:.3f} " f"conf=[{','.join(f'{k[2]:.2f}' for k in kps)}]")
+            _last_result[devid] = result  # 按设备记录最近结果（img people 模式判定用）
+        print(f"[result] [{devid}] {RESULT_TAG.get(result, '?'):11s} ratio={ratio:.3f} " f"conf=[{','.join(f'{k[2]:.2f}' for k in kps)}]")
         if db is not None:
             try:
-                db.execute("INSERT OR REPLACE INTO posture_log(ts, result, ratio) VALUES(?, ?, ?)", (time.time(), result, ratio))
+                db.execute("INSERT OR REPLACE INTO posture_log(ts, result, ratio, devid) VALUES(?, ?, ?, ?)", (time.time(), result, ratio, devid))
                 db.commit()
             except sqlite3.Error:
                 print("[history] 写库失败，历史记录停用（接收不受影响）")
@@ -615,7 +840,7 @@ def image_receiver():
     expected = 1
     while True:
         try:
-            data, _ = sock.recvfrom(65535)
+            data, addr = sock.recvfrom(65535)
         except socket.timeout:
             continue
         if len(data) < 12:
@@ -631,16 +856,38 @@ def image_receiver():
             buf.extend(payload)
             expected = chunk_id + 1
             if total > 0 and len(buf) >= total:
-                on_image(bytes(buf))
+                on_image(bytes(buf), _devid_by_ip(addr[0]))
                 buf = bytearray()
                 total = 0
                 expected = 0
 
 
-def on_image(jpg):
-    global frame_seq
-    frame_seq += 1
-    if (frame_seq - 1) % SAVE_EVERY_N != 0:  # 首帧即保存，之后每 N 帧存 1 帧
+_last_result = {}    # devid → 最近一帧 result（result_receiver 按设备记录）
+_nobody_streak = {}  # devid → 连续无有效结果的图像帧数（people 模式停存判定）
+
+
+def _person_present(devid):
+    """people 模式判定：该设备最近结果有效（OK/BAD=有人）→ 保存并清零计数；
+    尚无结果包（刚启动/旧固件）→ 保守视为有人；连续 IMG_NOBODY_SKIP_N 帧无效 → 停止保存。
+    有效口径与统计一致：result 0=OK 1=BAD_NECK 2=BAD_SHOULDER（3..5 无效）"""
+    r = _last_result.get(devid)
+    if r is None or r in (0, 1, 2):
+        _nobody_streak[devid] = 0
+        return True
+    _nobody_streak[devid] = _nobody_streak.get(devid, 0) + 1
+    return _nobody_streak[devid] <= IMG_NOBODY_SKIP_N  # 前 N 帧仍保存（容忍短暂离场），之后停
+
+
+def on_image(jpg, devid=""):
+    devid = devid or "unknown"
+    cfg = _img_cfg_for(devid)  # 该设备生效的抽稀/叠加设置（默认 + 专属覆盖）
+    if cfg["save_n"] < 1:
+        return  # 0=不保存：不解码不落盘也不计数（重开后重新抽稀，首帧即存）
+    if cfg.get("people") and not _person_present(devid):
+        return  # 仅保存有人帧：连续 IMG_NOBODY_SKIP_N 帧无有效结果 → 停存（不推进抽稀计数）
+    n = frame_seq.get(devid, 0) + 1
+    frame_seq[devid] = n
+    if (n - 1) % cfg["save_n"] != 0:  # 该设备首帧即保存，之后每 N 帧存 1 帧
         return
 
     if len(jpg) < 2 or jpg[0] != 0xFF or jpg[1] != 0xD8:
@@ -658,7 +905,7 @@ def on_image(jpg):
         result = latest["result"]
 
     if len(kps) == 6:
-        if DRAW_KEYPOINTS:  # 关键点叠加开关（连线 + 圆圈 + 标签）
+        if cfg["draw_kp"]:  # 关键点叠加开关（连线 + 圆圈 + 标签）
             # 双眼 / 双耳 / 双肩 三条连线
             for a, b in ((0, 1), (2, 3), (4, 5)):
                 draw.line([kps[a][0] * W, kps[a][1] * H, kps[b][0] * W, kps[b][1] * H], fill="white", width=2)
@@ -724,52 +971,311 @@ def on_image(jpg):
             f"conf: [{','.join(f'{k[2]:.2f}' for k in kps)}]",
         ]
         color = "red" if result in (1, 2) else "lime"  # 坐姿不良(BAD_NECK/BAD_SHOULDER)显示红色
-        if DRAW_KEYPOINTS:  # 左上角判断文字同样受 DRAW_KEYPOINTS 控制
+        if cfg["draw_kp"]:  # 左上角判断文字同样受叠加开关控制
             yy = 4
             for line in info:
                 draw.text((4, yy), line, fill=color)
                 yy += 12
 
-    # 右下角时间戳：PC 收到本帧的时刻（同样受 DRAW_KEYPOINTS 控制）
-    if DRAW_KEYPOINTS:
+    # 右下角时间戳：PC 收到本帧的时刻（同样受叠加开关控制）
+    if cfg["draw_kp"]:
         stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         tw = draw.textlength(stamp)
         draw.text((W - tw - 4, H - 14), stamp, fill="yellow")
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
-    out = f"received_images/image_{ts}.png"
+    out_dir = os.path.join("received_images", devid)  # 按设备分目录（旧固件 devid=源 IP，同样可用）
+    os.makedirs(out_dir, exist_ok=True)
+    out = os.path.join(out_dir, f"image_{ts}.png")
     img.save(out)
-    print(f"[image]  保存 {out}  第{frame_seq}帧 ({RESULT_TAG.get(result, '?')})")
+    print(f"[image]  [{devid}] 保存 {out}  第{n}帧 ({RESULT_TAG.get(result, '?')})")
+
+
+def _img_save_desc(n):
+    """抽稀设置的显示文案（0=不保存）"""
+    return "不保存图片" if n < 1 else f"每 {n} 帧存 1 帧"
+
+
+def _img_cmd(arg=""):
+    """图像保存设置命令（键盘与 Web 共用）：
+    '' = 概览；kp on|off = 关键点叠加；save N = 抽稀保存（0=不保存）；people on|off = 仅保存有人帧
+    （最近结果连续 50 帧无效即停存，恢复有人立即续存）；reset @ID = 清除设备专属"""
+    usage = "[img] 用法: img | img kp on|off | img save N（0=不保存） | img people on|off | 指定设备 img kp @<序号|ID> on|off / img save @<序号|ID> N / img people @<序号|ID> on|off / img reset @<序号|ID>"
+    if not arg:
+        d = _img_cfg["default"]
+        print(f"[img] 默认(全部设备): 关键点叠加{'开' if d['draw_kp'] else '关'} | {_img_save_desc(d['save_n'])} | 仅有人帧{'开' if d['people'] else '关'}")
+        for k, v in _img_cfg["devices"].items():
+            if v:
+                c = _img_cfg_for(k)
+                print(f"[img]   {k}（专属）: 叠加{'开' if c['draw_kp'] else '关'} | {_img_save_desc(c['save_n'])} | 仅有人帧{'开' if c['people'] else '关'}")
+        return
+    kind, _, rest = arg.partition(" ")
+    devid = None
+    if rest.startswith("@"):  # img kp @dev on / img save @dev N / img reset @dev
+        head, _, rest = rest.partition(" ")
+        devid = _resolve_device(head[1:].lower())
+        if not devid:
+            return
+        rest = rest.strip()
+    if kind == "reset":
+        if devid and _img_cfg["devices"].pop(devid, None) is not None:
+            _save_img_cfg()
+            print(f"[img] 已清除 {devid} 的专属设置（恢复跟随默认）")
+        return
+    if kind == "kp" and rest in ("on", "off"):
+        val = rest == "on"
+        if devid is None:  # 全部设备：写默认并清掉该字段的所有专属
+            _img_cfg["default"]["draw_kp"] = val
+            for v in _img_cfg["devices"].values():
+                v.pop("draw_kp", None)
+        else:
+            _img_cfg["devices"].setdefault(devid, {})["draw_kp"] = val
+    elif kind == "people" and rest in ("on", "off"):
+        val = rest == "on"
+        if devid is None:
+            _img_cfg["default"]["people"] = val
+            for v in _img_cfg["devices"].values():
+                v.pop("people", None)
+        else:
+            _img_cfg["devices"].setdefault(devid, {})["people"] = val
+    elif kind == "save" and rest.isdigit() and int(rest) >= 0:
+        n = int(rest)
+        if devid is None:
+            _img_cfg["default"]["save_n"] = n
+            for v in _img_cfg["devices"].values():
+                v.pop("save_n", None)
+        else:
+            _img_cfg["devices"].setdefault(devid, {})["save_n"] = n
+    else:
+        print(usage)
+        return
+    _img_cfg["devices"] = {k: v for k, v in _img_cfg["devices"].items() if v}  # 清空 dict 条目
+    _save_img_cfg()
+    who = "全部设备" if devid is None else devid
+    if kind == "kp":
+        what = f"关键点叠加{'开' if rest == 'on' else '关'}"
+    elif kind == "people":
+        what = f"仅有人帧{'开' if rest == 'on' else '关'}（连续 {IMG_NOBODY_SKIP_N} 帧无人停存）"
+    else:
+        what = _img_save_desc(int(rest))
+    print(f"[img] {who}: {what}（已保存，重启仍生效）")
+
+
+def handle_command(cmd):
+    """处理一条交互命令（控制台 input 与 Web UI 共用同一条路径，行为完全一致）"""
+    if not cmd:
+        return
+    if cmd.lower() == "ota" or cmd.lower().startswith("ota "):
+        _ota_cmd(cmd[3:].strip().lower())
+        return
+    if cmd.lower() == "img" or cmd.lower().startswith("img "):
+        _img_cmd(cmd[3:].strip().lower())
+        return
+    if cmd.lower() == "alert" or cmd.lower().startswith("alert "):
+        _alert_cmd(cmd[5:].strip().lower())
+        return
+    if not cmd.lower().startswith("s"):
+        print(f"未知命令: {cmd}（s=设置检测时段，ota=固件升级，img=图像保存设置，alert=不良提醒模式）")
+        return
+    arg = cmd[1:].strip()
+    if not arg:
+        print("[sched] 用法: s HH:MM-HH:MM[,HH:MM-HH:MM...]（最多 5 段，支持跨午夜 22:00-06:30）或 s clear；" "指定设备: s @<序号|ID> HH:MM-HH:MM...（只改该设备）")
+        return
+    devid = None
+    if arg.startswith("@"):  # s @<序号|ID> 时段：仅下发该设备（与 ota 命令同一套设备引用）
+        head, _, rest = arg.partition(" ")
+        devid = _resolve_device(head[1:].lower())
+        if not devid:
+            return
+        arg = rest.strip()
+        if not arg:
+            print("[sched] 用法: s @<序号|ID> HH:MM-HH:MM... 或 s @<序号|ID> clear")
+            return
+    try:
+        slots = _parse_slots_arg(arg)
+    except ValueError as e:
+        print(f"[sched] 设置失败(未下发): {e}")
+        return
+    _sched_set_memory(devid, slots)
+    _send_sched_set(slots, devid)
+
+
+# Web 统计的时间范围：自然周期起点（与 posture_report.py 一致）→ 分桶粒度
+_WEB_RANGES = {"day": "hour", "week": "day", "month": "day", "year": "month", "all": "month"}
+
+
+def _range_start(key):
+    """时间窗起点（自然周期，与 posture_report.py 一致）；"all" 返回 None（起点=最早记录）"""
+    now = datetime.now()
+    if key == "day":
+        return now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if key == "week":
+        monday = now - timedelta(days=now.weekday())
+        return monday.replace(hour=0, minute=0, second=0, microsecond=0)
+    if key == "month":
+        return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if key == "year":
+        return now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    return None
+
+
+def _bucket_label(k, unit):
+    if unit == "hour":
+        return f"{k.hour:02d}时"
+    if unit == "day":
+        return f"{k.month:02d}-{k.day:02d}"
+    return f"{k.year}-{k.month:02d}"
+
+
+def _web_stats(range_key="day", device="all"):
+    """Web 坐姿统计（/api/stats）：按设备 + 时间范围出摘要与分桶计数。
+    摘要=检测/有效/不良帧数、不良率、不良事件数与最长持续（连续 BAD 间隔>5s 分段，
+    与 posture_report.py 口径一致）；桶补零（诚实显示空时段）；失败返回 error 不影响面板"""
+    range_key = range_key if range_key in _WEB_RANGES else "day"
+    unit = _WEB_RANGES[range_key]
+    try:
+        db = sqlite3.connect(HISTORY_DB, timeout=1)
+        devs = [r[0] for r in db.execute("SELECT devid FROM posture_log WHERE devid IS NOT NULL " "GROUP BY devid ORDER BY MIN(ts)")]  # 有历史记录的设备（首测时间排序）
+        for k in _devices:
+            if k not in devs and not k.replace(".", "").isdigit():  # 在线但暂无记录的设备也列出（IP 兜底键除外）
+                devs.append(k)
+
+        where = "ts >= ?"
+        start = _range_start(range_key)
+        args = [start.timestamp() if start else 0.0]  # all 用 0.0（Windows 上 epoch0 的 datetime.timestamp() 会抛 OSError）
+        if device != "all":
+            where += " AND devid = ?"
+            args.append(device)
+        if start is None:  # 全部：起点收敛到最早记录所在月（无记录则当月）
+            row = db.execute(f"SELECT MIN(ts) FROM posture_log WHERE {where}", args).fetchone()
+            first = datetime.fromtimestamp(row[0]) if row and row[0] else datetime.now()
+            start = first.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        total = valid = bad = events = 0
+        longest_ev = 0.0
+        last_bad_ts = None
+        ev_start = None
+        buckets = {}
+        for ts, result in db.execute(f"SELECT ts, result FROM posture_log WHERE {where} ORDER BY ts", args):
+            total += 1
+            t = datetime.fromtimestamp(ts)
+            if unit == "hour":
+                key = t.replace(minute=0, second=0, microsecond=0)
+            elif unit == "day":
+                key = t.replace(hour=0, minute=0, second=0, microsecond=0)
+            else:
+                key = t.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            cell = buckets.setdefault(key, [0, 0, 0])
+            cell[0] += 1
+            if 0 <= result <= 2:
+                valid += 1
+                cell[2] += 1
+                if result >= 1:
+                    bad += 1
+                    cell[1] += 1
+            if result in (1, 2):  # 不良事件分段：连续不良间隔>5s 开新段
+                if last_bad_ts is None or ts - last_bad_ts > 5:
+                    events += 1
+                    ev_start = ts
+                last_bad_ts = ts
+                if ev_start is not None:
+                    longest_ev = max(longest_ev, ts - ev_start)
+            else:
+                last_bad_ts = None
+                ev_start = None
+        db.close()
+
+        keys = []  # 补零桶：从窗口起点铺到当前，缺的桶计 0
+        now = datetime.now()
+        k = start
+        if unit == "hour":
+            end = now.replace(minute=0, second=0, microsecond=0)
+            while k <= end:
+                keys.append(k)
+                k += timedelta(hours=1)
+        elif unit == "day":
+            while k <= now:
+                keys.append(k)
+                k += timedelta(days=1)
+        else:
+            end = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            while k <= end:
+                keys.append(k)
+                k = (k.replace(day=1) + timedelta(days=32)).replace(day=1)  # 下个月
+        def _bucket_out(k):  # 桶级不良率=该桶不良/该桶有效帧（valid 分母，与摘要同口径；随设备过滤区分全部/单台）
+            t, b, v = buckets.get(k, (0, 0, 0))
+            return {"label": _bucket_label(k, unit), "total": t, "bad": b,
+                    "rate": round(b * 100 / v, 1) if v else None}
+
+        bl = [_bucket_out(k) for k in keys]
+        return {
+            "range": range_key,
+            "device": device,
+            "devices": devs,
+            "summary": {"total": total, "valid": valid, "bad": bad, "rate": round(bad * 100 / valid, 1) if valid else None, "events": events, "longest_min": round(longest_ev / 60, 1)},
+            "buckets": bl,
+            "unit": {"hour": "小时", "day": "天", "month": "月"}[unit],
+        }
+    except sqlite3.Error as e:
+        return {"error": str(e), "devices": [], "summary": {}, "buckets": []}
+
+
+def _web_state():
+    """Web 控制台状态快照（web_ui 的 /api/state 每 2s 调一次）：
+    设备表、调度状态行、OTA 批次、最新判断、今日统计"""
+    want = _bin_sha8(OTA_BIN)
+    now = time.time()
+    devs = []
+    for k, d in _devices.items():
+        online = now - d.get("last_seen", 0) < 30
+        sched_ok = online and now - d.get("sched_seen", 0) < 90  # 最近一次 SCHED_STATE（2s 查询周期）
+        devs.append(
+            {
+                "id": k,
+                "ip": d.get("ip"),
+                "ver": d.get("ver"),
+                "online": online,
+                "up_to_date": bool(want and d.get("sha8") == want),
+                "fails": d.get("fails", 0),
+                "sched_desc": d.get("sched_desc") if sched_ok else None,  # 检测时段（None=尚未上报）
+                "sched_synced": d.get("sched_synced") if sched_ok else None,  # ESP 时间同步状态
+                "sched_active": d.get("sched_active") if sched_ok else None,
+                "alert": d.get("alert"),  # 不良提醒模式（True=连续播；None=旧固件未上报）
+            }
+        )
+    return {
+        "fw_version": _fw_version(),
+        "watch": _ota_state["watch"],
+        "alert_default": _sched_mem["alert_default"],  # 不良提醒模式默认（全部设备）
+        "ota_current": _ota_batch["current"],
+        "ota_phase": _ota_batch["phase"],
+        "ota_progress": ({"cur": _ota_batch["progress"]["cur"], "tot": _ota_batch["progress"]["tot"],
+                          "pct": min(100, _ota_batch["progress"]["cur"] * 100 // _ota_batch["progress"]["tot"])}
+                         if _ota_batch["progress"] and _ota_batch["progress"].get("tot") else None),
+        "ota_queue": len(_ota_batch["queue"]),
+        "devices": devs,
+        "sched_map": {k: v["ui"] for k, v in _sched_last.items() if now - v["t"] < 90},  # devid → 调度状态（90s 心跳窗口）
+        "img": {"default": dict(_img_cfg["default"]),
+                "devices": {k: _img_cfg_for(k) for k in _devices}},  # 各设备生效的抽稀/叠加
+        "img_custom": sorted(_img_cfg["devices"]),  # 有专属设置的设备
+    }
 
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(line_buffering=True)  # IDE/管道下 stdout 是块缓冲，子线程 print 会积压不显示
+    import web_ui
+
+    web_ui.set_stats_provider(_web_stats)  # 坐姿统计：/api/stats（设备 × 时间范围）
+    web_ui.start(_web_state, handle_command)  # Web 控制台 :20005（先装 print 镜像，再启其余线程）
     threading.Thread(target=result_receiver, daemon=True).start()
     threading.Thread(target=image_receiver, daemon=True).start()
     threading.Thread(target=discovery_broadcaster, daemon=True).start()
-    print("接收器启动：图像 :20000 + 结果 :20002 + 发现 :20003 → received_images/image_*.png")
-    print("命令：s 09:00-11:30,14:00-18:00 设置时段 | s clear 清空 | ota 升级全部 | ota list 设备表 | ota 2/a1b2c3 指定设备 | ota on/off 自动检测 | Ctrl+C 退出")
+    print("接收器启动：图像 :20000 + 结果 :20002 + 发现 :20003 → received_images/<设备ID>/image_*.png（按设备分目录）")
+    print("Web 控制台: http://localhost:20005（浏览器/手机打开，功能与下方命令等价）")
+    print("命令：s 09:00-11:30,14:00-18:00 设置时段(全部) | s @2/a1b2c3 ... 指定设备 | s clear 清空 | ota 升级全部 | ota list 设备表 | ota 2/a1b2c3 指定设备 | ota on/off 自动检测 | img 图像保存设置 | alert repeat|once 不良提醒模式 | Ctrl+C 退出")
     try:
         while True:
-            cmd = input().strip()
-            if not cmd:
-                continue
-            if cmd.lower() == "ota" or cmd.lower().startswith("ota "):
-                _ota_cmd(cmd[3:].strip().lower())
-                continue
-            if not cmd.lower().startswith("s"):
-                print(f"未知命令: {cmd}（s=设置检测时段，ota/ota list/ota <序号|ID> =固件升级）")
-                continue
-            arg = cmd[1:].strip()
-            if not arg:
-                print("[sched] 用法: s HH:MM-HH:MM[,HH:MM-HH:MM...]（最多 5 段，支持跨午夜 22:00-06:30）或 s clear")
-                continue
-            try:
-                slots = _parse_slots_arg(arg)
-            except ValueError as e:
-                print(f"[sched] 设置失败(未下发): {e}")
-                continue
-            _send_sched_set(slots)
+            handle_command(input().strip())
     except EOFError:
         # stdin 不可用（后台运行/计划任务/无控制台）：退化为纯接收模式，Ctrl+C 退出
         print("[main] stdin 不可用，进入无交互模式（仅接收/记录）")

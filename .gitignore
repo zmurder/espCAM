@@ -83,3 +83,7 @@ ref/*
 # Runtime data (posture report / captured frames)
 posture_history.db
 received_images/
+
+# PC receiver runtime state (per-machine, do not commit)
+recv_settings.json
+sched_per_dev.json

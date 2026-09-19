@@ -61,6 +61,17 @@ void posture_sched_notify_time_synced(void);
  */
 void posture_sched_log_slots(void);
 
+/**
+ * @brief 不良提醒模式：true=连续播（不良持续则播完接着播），false=每轮不良事件只播一次。
+ *        NVS 持久化（断电保持），默认 true；经 UDP 20003 设置（ESPCAM_ALERT_SET）
+ */
+bool posture_alert_repeat_enabled(void);
+
+/**
+ * @brief 设置不良提醒模式并写入 NVS
+ */
+void posture_alert_set_repeat(bool en);
+
 #ifdef __cplusplus
 }
 #endif

@@ -1,0 +1,23 @@
+[Unit]
+Description=ESP32-CAM posture receiver (UDP image/result + Web console :20005)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# systemd 环境默认无 LANG，中文日志可能被 journal 折叠/乱码；显式指定 UTF-8
+Environment=LANG=C.UTF-8 LC_ALL=C.UTF-8
+# 不要用 root 跑，数据文件属主会乱
+User=zyd
+# posture_history.db / received_images / sched_per_dev.json / recv_settings.json 都落在这里
+WorkingDirectory=/home/zyd/code/esp32_cam
+ExecStart=/usr/bin/python3 simple_udp_receiver.py
+# 崩溃自动拉起（5s 后）；systemd 下 stdin=null，接收器自动进无交互模式，Web 控制台照常可用
+Restart=always
+RestartSec=5
+# 日志进 journal（journalctl -u espcam 查看），不落单独文件
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -23,10 +23,12 @@ static const char* TAG = "POSTURE_SCHED";
 
 #define NVS_NAMESPACE "psched"
 #define NVS_KEY_SLOTS "slots"
+#define NVS_KEY_ALERT_REPEAT "alert_rep"
 
 static posture_sched_slot_t s_slots[POSTURE_SCHED_MAX_SLOTS];
 static int s_slot_count = 0;   // 已设置段数（0=未设置=全天检测）
 static int s_last_active = -1; // 上次窗口状态：-1=未知（首帧/重同步后），0/1=已知（边沿日志用）
+static bool s_alert_repeat = true;  // 不良提醒模式：true=连续播（默认），false=每轮只播一次
 
 // 纯计算：minute 是否落在任一窗口（start>end 视为跨午夜绕过 00:00）
 static bool calc_in_window(int minute)
@@ -93,7 +95,32 @@ void posture_sched_init(void)
     else {
         ESP_LOGI(TAG, "No schedule in NVS, detection always on");
     }
+    uint8_t rep = 1;
+    if (nvs_get_u8(h, NVS_KEY_ALERT_REPEAT, &rep) == ESP_OK) {
+        s_alert_repeat = rep != 0;
+    }
     nvs_close(h);
+    ESP_LOGI(TAG, "Alert repeat mode: %s", s_alert_repeat ? "repeat" : "once");
+}
+
+bool posture_alert_repeat_enabled(void)
+{
+    return s_alert_repeat;
+}
+
+void posture_alert_set_repeat(bool en)
+{
+    s_alert_repeat = en;
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
+        ESP_ERROR_CHECK(nvs_set_u8(h, NVS_KEY_ALERT_REPEAT, en ? 1 : 0));
+        ESP_ERROR_CHECK(nvs_commit(h));
+        nvs_close(h);
+    }
+    else {
+        ESP_LOGE(TAG, "NVS open failed, alert mode NOT persisted");
+    }
+    ESP_LOGI(TAG, "Alert repeat mode set: %s", en ? "repeat" : "once");
 }
 
 void posture_sched_log_slots(void)

@@ -1,6 +1,6 @@
 /**
  * posture_model.cpp
- * 坐姿检测模型 - 6 关键点（pose_model_6kp_v2.espdl）
+ * 坐姿检测模型 - 6 关键点（pose_model.espdl，2026-09-19 更新；输入 exponent -6，运行时自动读取）
  *
  * 前处理（与训练 dataset.py 对齐，见 model/esp32_deploy）:
  * 1. center crop（QVGA 320×240 已是 4:3，全图即可）
@@ -37,8 +37,8 @@
 
 static const char* TAG = "POSTURE_MODEL";
 
-// 模型嵌入 rodata（pose_model_6kp_v2.espdl，6 关键点）
-extern const uint8_t pose_model_6kp_v2_espdl[] asm("_binary_pose_model_6kp_v2_espdl_start");
+// 模型嵌入 rodata（pose_model.espdl，6 关键点）
+extern const uint8_t pose_model_espdl[] asm("_binary_pose_model_espdl_start");
 
 // 测试图嵌入 rodata（POSTURE_TEST_IMAGE_MODE=1 时用 model/320240.jpg 推理）
 #if POSTURE_TEST_IMAGE_MODE
@@ -280,7 +280,7 @@ esp_err_t posture_model_init(void)
 
     // 创建模型：param_copy=true 把参数拷到 PSRAM（8MB PSRAM 充裕），
     // 否则 param_copy=false 每个卷积都要从 flash 读权重，推理会慢到 40s+ 触发 watchdog
-    s_model = new dl::Model((const char*)pose_model_6kp_v2_espdl,
+    s_model = new dl::Model((const char*)pose_model_espdl,
                             fbs::MODEL_LOCATION_IN_FLASH_RODATA,
                             0,                          // max_internal_size
                             dl::MEMORY_MANAGER_GREEDY,  // mm_type

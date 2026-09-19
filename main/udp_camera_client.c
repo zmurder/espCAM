@@ -549,10 +549,12 @@ static void ota_update_task(void* arg)
 }
 
 /**
- * @brief UDP 20003 服务任务：自动发现 + 检测时间段设置/查询 + OTA 触发
- *  - ESPCAM_DISCOVER              → 学习源 IP 为发送目标 + 回 "ESPCAM_ACK <版本号>"
+ * @brief UDP 20003 服务任务：自动发现 + 检测时间段设置/查询 + 提醒模式设置 + OTA 触发
+ *  - ESPCAM_DISCOVER              → 学习源 IP 为发送目标 + 回 "ESPCAM_ACK <设备ID> <版本> <sha8> <提醒模式>"
  *  - ESPCAM_SCHED_GET             → 回当前调度状态
  *  - ESPCAM_SCHED_SET n HH:MM …   → 设置时间段（写 NVS）+ 回状态；解析失败回 ESPCAM_SCHED_ERR 原因
+ *  - ESPCAM_ALERT_SET 0|1         → 设置不良提醒模式（写 NVS）+ 回 ESPCAM_ALERT_STATE
+ *  - ESPCAM_ALERT_GET             → 回 ESPCAM_ALERT_STATE 0|1
  *  - ESPCAM_OTA_START http://…    → 回 ESPCAM_OTA_STARTED 并启动下载任务（PC 的 IP 动态）
  */
 static void udp_discovery_task(void* pvParameters)
@@ -598,14 +600,15 @@ static void udp_discovery_task(void* pvParameters)
         if (strcmp(rx, DISCOVERY_REQ) == 0) {
             set_server_ip(src.sin_addr.s_addr);  // 学习 PC 的 IP（已相同则静默）
             // ACK 附带设备 ID（WiFi MAC 后 3 字节 hex，多设备区分）+ 版本号 + ELF SHA256 前 8 位
-            // （PC 维护设备表：逐台对比 ota/ 固件 sha 决定是否升级）
+            // + 不良提醒模式 0|1（PC 设备表展示；旧 PC 只看前 4 段不受影响）
             char ack[80];
             char sha8[9];
             uint8_t mac[6];
             esp_read_mac(mac, ESP_MAC_WIFI_STA);
             esp_app_get_elf_sha256(sha8, sizeof(sha8));
-            int alen = snprintf(ack, sizeof(ack), "ESPCAM_ACK %02x%02x%02x %s %s",
-                                mac[3], mac[4], mac[5], APP_VERSION, sha8);
+            int alen = snprintf(ack, sizeof(ack), "ESPCAM_ACK %02x%02x%02x %s %s %d",
+                                mac[3], mac[4], mac[5], APP_VERSION, sha8,
+                                posture_alert_repeat_enabled() ? 1 : 0);
             sendto(sock, ack, alen, 0, (struct sockaddr*)&src, sizeof(src));
         }
         else if (strncmp(rx, "ESPCAM_SCHED_GET", 16) == 0) {
@@ -658,6 +661,26 @@ static void udp_discovery_task(void* pvParameters)
                 int len = posture_sched_build_state(buf, sizeof(buf));
                 sendto(sock, buf, len, 0, (struct sockaddr*)&src, sizeof(src));  // 回状态即确认
             }
+        }
+        else if (strncmp(rx, "ESPCAM_ALERT_SET", 16) == 0) {
+            // 不良提醒模式：ESPCAM_ALERT_SET 0|1（0=只播一次，1=连续播），写 NVS 后回执
+            int mode = -1;
+            sscanf(rx + 16, " %d", &mode);
+            if (mode == 0 || mode == 1) {
+                posture_alert_set_repeat(mode == 1);
+                char rbuf[32];
+                int rlen = snprintf(rbuf, sizeof(rbuf), "ESPCAM_ALERT_STATE %d", mode);
+                sendto(sock, rbuf, rlen, 0, (struct sockaddr*)&src, sizeof(src));
+            }
+            else {
+                sendto(sock, "ESPCAM_ALERT_ERR bad arg", 24, 0, (struct sockaddr*)&src, sizeof(src));
+            }
+        }
+        else if (strncmp(rx, "ESPCAM_ALERT_GET", 16) == 0) {
+            char rbuf[32];
+            int rlen = snprintf(rbuf, sizeof(rbuf), "ESPCAM_ALERT_STATE %d",
+                                posture_alert_repeat_enabled() ? 1 : 0);
+            sendto(sock, rbuf, rlen, 0, (struct sockaddr*)&src, sizeof(src));
         }
     }
 }

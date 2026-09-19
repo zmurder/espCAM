@@ -123,14 +123,15 @@ static void posture_inference_task(void* arg)
         ret = posture_model_run_inference(fb, &output);
 
         if (ret == ESP_OK) {
-            // 连续不良确认：POSTURE_ALERT_CONSECUTIVE 宏控制连续多少帧不良才播提示音
+            // 连续不良确认：POSTURE_ALERT_CONSECUTIVE 宏控制连续多少帧不良才播提示音；
+            // 提醒模式（NVS，网页可设）：连续播=不良持续则每帧播完接着播；只播一次=每轮不良事件仅首次播
             static uint32_t s_bad_streak = 0;    // 连续不良帧计数（非不良帧清零）
             static bool s_alert_played = false;  // 本轮连续不良是否已播过提示（恢复后复位，防止重播轰炸）
 
             if (output.result == POSTURE_BAD_NECK || output.result == POSTURE_BAD_SHOULDER) {
                 const char* bad_name = (output.result == POSTURE_BAD_NECK) ? "BAD_NECK" : "BAD_SHOULDER";
                 s_bad_streak++;
-                if (!s_alert_played && s_bad_streak >= POSTURE_ALERT_CONSECUTIVE) {
+                if ((!s_alert_played || posture_alert_repeat_enabled()) && s_bad_streak >= POSTURE_ALERT_CONSECUTIVE) {
                     ESP_LOGE(TAG, "Posture: %s (ratio=%.3f) streak=%lu/%d -> play alert", bad_name, output.ratio, (unsigned long)s_bad_streak, POSTURE_ALERT_CONSECUTIVE);
                     audio_player_play_posture_alert(output.result);
                     s_alert_played = true;
