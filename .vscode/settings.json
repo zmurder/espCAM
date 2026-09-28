@@ -3,16 +3,15 @@
   "idf.openOcdConfigs": [
     "board/esp32s3-builtin.cfg"
   ],
-  "idf.portWin": "COM3",
-  "idf.currentSetup": "d:\\esp\\v5.4.2\\esp-idf",
+  "idf.espIdfPath": "C:\\esp\\v6.1\\esp-idf",
+  "idf.toolsPath": "C:\\Espressif\\tools",
+  "idf.pythonInstallPath": "C:\\Espressif\\tools\\python\\v6.1\\venv\\Scripts\\python.exe",
+  "idf.gitPath": "C:\\Users\\zmurd\\AppData\\Local\\Programs\\Git\\cmd\\git.exe",
   "idf.customExtraVars": {
-    "IDF_TARGET": "esp32s3"
+    "IDF_TARGET": "esp32s3",
+    "IDF_TOOLS_PATH": "C:\\Espressif\\tools"
   },
-  "clangd.path": "d:\\esp-tools\\tools\\esp-clang\\esp-18.1.2_20240912\\esp-clang\\bin\\clangd.exe",
-  "clangd.arguments": [
-    "--background-index",
-    "--query-driver=d:\\esp-tools\\tools\\xtensa-esp-elf\\esp-14.2.0_20241119\\xtensa-esp-elf\\bin\\xtensa-esp32-elf-gcc.exe",
-    "--compile-commands-dir=c:\\Users\\zyd\\espCAM\\build"
-  ],
-  "idf.flashType": "UART"
+  "idf.flashType": "UART",
+  "idf.port": "COM8",
+  "idf.currentSetup": "C:\\esp\\v6.1\\esp-idf"
 }

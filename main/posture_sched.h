@@ -62,15 +62,57 @@ void posture_sched_notify_time_synced(void);
 void posture_sched_log_slots(void);
 
 /**
- * @brief 不良提醒模式：true=连续播（不良持续则播完接着播），false=每轮不良事件只播一次。
- *        NVS 持久化（断电保持），默认 true；经 UDP 20003 设置（ESPCAM_ALERT_SET）
+ * @brief 不良语音提醒模式（NVS 持久化，断电保持；经 UDP 20003 设置 ESPCAM_ALERT_SET）：
+ *        REPEAT=连续播（不良持续则播完接着播）/ ONCE=每轮不良事件只播一次 /
+ *        OFF=关闭语音播报（仅不播音，检测与 UDP 结果上报照常运行）
+ *        枚举值与 NVS/协议值一致（0/1 与旧固件兼容，2 为新增）
  */
-bool posture_alert_repeat_enabled(void);
+typedef enum
+{
+    POSTURE_ALERT_ONCE = 0,    /* 只播一次 */
+    POSTURE_ALERT_REPEAT = 1,  /* 连续播（默认） */
+    POSTURE_ALERT_OFF = 2,     /* 关闭语音播报 */
+} posture_alert_mode_t;
+
+/**
+ * @brief 获取当前不良提醒模式
+ */
+posture_alert_mode_t posture_alert_get_mode(void);
 
 /**
  * @brief 设置不良提醒模式并写入 NVS
  */
-void posture_alert_set_repeat(bool en);
+void posture_alert_set_mode(posture_alert_mode_t mode);
+
+/**
+ * @brief 前倾判断阈值（眼/耳-肩垂直距离 ÷ 双眼/耳距 < 阈值 → 前倾）：
+ *        运行时可配、NVS 持久化（断电保持），默认 1.5；经 UDP 20003 设置（ESPCAM_RATIO_SET）。
+ *        20003 任务写、推理任务读：32 位对齐 float 单字读写，与 s_server_ip 同理无锁安全
+ */
+float posture_ratio_eye_min(void);
+float posture_ratio_ear_min(void);
+
+/**
+ * @brief 设置眼/耳前倾比阈值并写入 NVS；范围 0.2~10.0，超出返回 false（不写入）
+ */
+bool posture_ratio_set(float eye, float ear);
+
+/**
+ * @brief 歪头判断阈值（双眼/双耳-双肩相对倾斜角 > 阈值 → 歪头，单位度）：
+ *        运行时可配、NVS 持久化（断电保持），默认 35；经 20003 的 ESPCAM_RATIO_SET 第 3/4 参数设置
+ */
+float posture_tilt_eye_max(void);
+float posture_tilt_ear_max(void);
+
+/**
+ * @brief 设置眼/耳歪头倾斜角阈值并写入 NVS；范围 10~80 度，超出返回 false（不写入）
+ */
+bool posture_tilt_set(float eye_tilt, float ear_tilt);
+
+/**
+ * @brief 生成状态文本 "ESPCAM_RATIO_STATE <eye> <ear> <eyeTilt> <earTilt>"，返回长度
+ */
+int posture_ratio_build_state(char* buf, int buf_len);
 
 #ifdef __cplusplus
 }

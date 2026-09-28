@@ -30,7 +30,8 @@ build/
 *.map
 flasher_args.json # Generated in build directory
 sdkconfig.old
-sdkconfig
+# sdkconfig 入库（不忽略）：含 menuconfig 手动改动（如 PSRAM 八线模式），
+# 不跟踪的话换机器/新 clone 从 defaults 重生成会丢配置（2026-09 踩过：QUAD 起不来）
 
 # ESP-IDF dependencies
 # For older versions or manual component management

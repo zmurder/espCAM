@@ -51,12 +51,14 @@ app_main.c                    # 入口点 - 初始化所有子系统
 - **端口 20001**：来自 PC 的音频流（8-bit PCM）
 - **端口 20002**：检测结果（result + ratio + 6 关键点，78 字节）
 - **端口 20003**：自动发现 + 检测时间段调度 + 提醒模式设置 + OTA 触发（文本协议，与 `udp_discovery_task` 对应）
-  - `ESPCAM_DISCOVER` → ESP 学习源 IP 并回 `ESPCAM_ACK <设备ID> <固件版本号> <elf_sha8> <提醒模式>`（设备ID=WiFi MAC 后 3 字节 hex；PC 解析进**设备表**逐台显示版本、对比 ota/ 固件 sha 自动触发升级；第 5 段提醒模式 0|1 供 Web 设备表"提醒"列展示，旧固件无此段 PC 显示"—"；旧 PC 只看前 4 段不受影响）；PC 端每 2s 广播（双保险：受限广播 + /24 定向广播），PC IP 变化后 2s 内自动跟随
+  - `ESPCAM_DISCOVER` → ESP 学习源 IP 并回 `ESPCAM_ACK <设备ID> <固件版本号> <elf_sha8> <提醒模式> <眼阈值> <耳阈值>`（设备ID=WiFi MAC 后 3 字节 hex；PC 解析进**设备表**逐台显示版本、对比 ota/ 固件 sha 自动触发升级；第 5 段提醒模式 0|1|2 供 Web 设备表"提醒"列展示，第 6/7 段眼/耳前倾比阈值与第 8/9 段眼/耳歪头倾角阈值供 Web"前倾阈值"列与设置卡读取当前值，旧固件无这些段 PC 显示"—"；旧 PC 只看前 4 段不受影响）；PC 端每 2s 广播（双保险：受限广播 + /24 定向广播），PC IP 变化后 2s 内自动跟随
   - `ESPCAM_SCHED_GET` → ESP 回 `ESPCAM_SCHED_STATE synced active n HH:MM HH:MM ...`（当前调度状态；PC 端状态变化立即打印、不变则 60s 一条心跳，行尾附 ESP 固件版本）
   - `ESPCAM_SCHED_SET n HH:MM HH:MM ...` → 设置检测时段（n≤5，n=0 清空），ESP 存 NVS 并回 SCHED_STATE 确认；解析失败回 `ESPCAM_SCHED_ERR 原因`；PC 端可**按设备**设置：`s 09:00-11:30,14:00-18:00` / `s clear` 广播全部设备，`s @<序号|ID> ...` 单播指定设备（与 ota 命令同一套设备引用；ESP 端各设备 NVS 独立，本就支持每台不同时段）。记忆文件 `sched_per_dev.json`（default=全部统一 + devices=各台专属）：手动"全部"会统一并清掉专属；启动时 default 广播一次、有专属的设备 ACK 后单播覆盖（重启/重新上线自动恢复）；无记忆文件时 default 取 `POSTURE_SCHED_SLOTS` 常量（旧语义）；所有下发均本地预校验。SCHED_STATE 的时段/时间同步状态存入设备表（Web 设备列表展示），`[sched]`/`[result]`/`[image]` 日志行带 `[devid]` 前缀（按源 IP 归属，多设备不混淆）
   - `ESPCAM_OTA_START http://IP:端口/espCAM_WIFI.bin` → ESP 回 `ESPCAM_OTA_STARTED` 并启动下载任务，下载中每 256KB 推 `ESPCAM_OTA_PROGRESS <已收字节> <总字节>`（PC 打印百分比进度）；完成后回 `ESPCAM_OTA_DONE` 重启进新固件；失败回 `ESPCAM_OTA_ERR 原因`（当前固件不受影响）；重复触发回 `ESPCAM_OTA_ERR busy`（防重入，正常）。URL 由 PC 填本机当前 IP，**IP 动态无需固定**；PC 已学到 ESP IP 时**单播一份**（双保险广播两份曾致 ESP 竞态创建两个下载任务写坏镜像，ESP 端置位提前到建任务前已根治）
-  - `ESPCAM_ALERT_SET <0|1>` → 设置不良提醒模式（1=连续播，0=只播一次），ESP 写 NVS 并回 `ESPCAM_ALERT_STATE <0|1>` 确认；`ESPCAM_ALERT_GET` → 查询回同格式 STATE；PC 端命令 `alert` 查看 / `alert repeat|once` 广播全部 / `alert @<序号|ID> repeat|once` 单播指定设备（设备引用与 ota/s 同一套）；记忆并入 `sched_per_dev.json`（alert_default + alert_devices，语义同时段：全部=统一清专属、单台=专属覆盖；启动 default 广播一次、专属设备 ACK 后补发）。存储于 `posture_sched.c`（NVS psched/alert_rep，默认连续播）
+  - `ESPCAM_ALERT_SET <0|1|2>` → 设置不良提醒模式（1=连续播，0=只播一次，2=关闭语音——仅不播音，检测与结果上报照常），ESP 写 NVS 并回 `ESPCAM_ALERT_STATE <0|1|2>` 确认；`ESPCAM_ALERT_GET` → 查询回同格式 STATE；PC 端命令 `alert` 查看 / `alert repeat|once|off` 广播全部 / `alert @<序号|ID> repeat|once|off` 单播指定设备（设备引用与 ota/s 同一套）；记忆并入 `sched_per_dev.json`（alert_default + alert_devices，语义同时段：全部=统一清专属、单台=专属覆盖；启动 default 广播一次、专属设备 ACK 后补发；旧记忆文件的布尔值自动迁移为 0|1）。存储于 `posture_sched.c`（NVS psched/alert_rep，`posture_alert_mode_t` 三态枚举，默认连续播）
+  - `ESPCAM_RATIO_SET <眼> <耳> [<眼倾角> <耳倾角>]` → 设置检测阈值：前倾比（0.2~10，默认眼 1.2 / 耳 0.7）必填，歪头倾角（10~80 度，默认眼 20 / 耳 15）可选（只给 2 个参数时倾角保持不变）；ESP 写 NVS（上电读取）并回 `ESPCAM_RATIO_STATE <眼> <耳> <眼倾角> <耳倾角>` 确认；`ESPCAM_RATIO_GET` → 查询回同格式 STATE；解析/超范围回 `ESPCAM_RATIO_ERR 原因`；PC 端命令 `ratio` 查看 / `ratio 1.5 1.2 35 30` 广播全部 / `ratio @<序号|ID> ...` 单播指定设备（设备引用与 ota/s/alert 同一套）；记忆并入 `sched_per_dev.json`（ratio_default + ratio_devices 存四元组，旧二元组自动补默认倾角；语义同 alert）；存储于 `posture_sched.c`（NVS psched/eye_ratio、ear_ratio u16 百分之一 + eye_tilt、ear_tilt u16 十分之一度），判断逻辑在 `posture_model.cpp` 经 `posture_ratio_eye/ear_min()` 与 `posture_tilt_eye/ear_max()` 运行时读取；PC 端叠加复算按设备跟随 ACK 上报的实际阈值（旧固件回退常量 1.2/0.7 与 20/15）
   - SNTP 对时成功时 ESP 主动向已学习 IP 推送一次 SCHED_STATE（**不能在 SNTP 回调里直接 sendto**——回调运行在 lwIP tcpip_thread 上下文，自等待会永久死锁挂起之后所有 socket 操作；正确做法：回调只置标志 `time_sync_pop_event()`，由 20003 任务在收包循环顶部轮询取走后调 `udp_sched_push_state()`，该 socket 设 1s 接收超时保证无流量时轮询仍运行）
+- **设置类命令（SCHED_SET / ALERT_SET / RATIO_SET）下发均为"广播 + 在线设备逐台单播"双保险**：命令幂等（重复写同一值无副作用，回执按值/文本去重），防弱信号网络广播丢包导致"某台没设上要手动重点"；OTA_START 不在此列——重复包会触发 ESP 竞态创建两个下载任务写坏镜像，必须单发（丢了靠 push 阶段 10s 重发兜底）
 - 目标 IP：`UDP_SERVER_IP`（`udp_camera_client.c`）仅为编译期默认值，运行时由 20003 发现机制自动覆盖
 
 ### 坐姿历史记录（PC 端）
@@ -72,6 +74,7 @@ app_main.c                    # 入口点 - 初始化所有子系统
 - **分区表**（`partitions.csv`，16MB flash）：双 OTA 槽 ota_0/ota_1 各 5MB + otadata 8KB + nvs/phy + storage(fat) 约 5.9MB；OTA 写入另一槽，重启切换，坏镜像由 bootloader 拒绝并回滚
 - **升级流程**：PC 接收器输入 `ota`（自动把 `build/espCAM_WIFI.bin` 拷入 `ota/`）→ 本地起 HTTP 服务（`:20004` 只共享 `ota/`）→ **单播** `ESPCAM_OTA_START` 到目标设备（URL 带本机当前 IP，**动态无需固定**；多设备下绝不广播——广播会同时打到所有设备）→ ESP 流式下载写另一 app 分区（`esp_ota_write` 首块校验镜像头、`esp_ota_end` 校验完整性）→ `esp_ota_set_boot_partition` + 重启
 - **升级期间 ESP 暂停坐姿检测**（`udp_ota_in_progress()`）：不抢 WiFi 空口带宽、避免推理 flash 访问与擦写互斥，下载更快；重启进新固件自动恢复
+- **升级期间 ESP 挂起音频**（`audio_player_suspend()`，见"音频播放"节）：中止未播完的提示音并把 I2S 通道关掉，否则整个 OTA 期间喇叭会持续"哒哒"响；下载失败路径 `audio_player_resume()` 恢复，成功则重启即恢复
 - **多设备**：PC 维护设备表（devid → IP/版本/sha/失败计数/最近应答），`ota list` 列出在线设备（序号/ID/IP/版本/是否待升级）；**逐台串行升级**（一台确认/失败/超时再推下一台，避免同时下载挤占带宽），下载中每 256KB 推进度；自动检测按设备逐台对比 sha、60s 冷却、3 次熔断（`ota on` 重开）
 - **命令**：`ota` 或 `ota all`（全部待升级设备）/ `ota list`（设备表）/ `ota <序号|ID前缀>`（指定设备）/ `ota on` / `ota off`（自动检测开关，默认开）；命令分发在 `_ota_cmd()`（input 交互与 Web UI 共用入口）；HTTP 服务对 ESP 重启/断开导致的连接中断只打一行提示（不打 traceback）
 - **版本号**：`年月日_当日序号`（如 `20260916_1`），**手动维护**——发布新固件前改 `main/app_version.h` 的 `APP_VERSION` 宏（同日递增、跨日重置）；忘记改不会漏升级（自动检测依据是 elf_sha256，与版本号无关）
@@ -81,8 +84,8 @@ app_main.c                    # 入口点 - 初始化所有子系统
 ### Web 控制台（PC 端，:20005）
 
 - `web_ui.py`：内嵌于接收器进程的网页控制台（标准库 http.server，零依赖），接收器启动即自动开启；浏览器打开 `http://localhost:20005`（同局域网手机用 `http://<本机IP>:20005`）
-- **功能**：设备表（ID/IP/固件/检测时段/时间同步/**提醒**/最新|待升级|离线，升级中那台显示下载进度条）+ 顶部 OTA 横幅（百分比/等待重启确认/排队数）+ 升级全部/逐台升级/自动检测开关 + "提醒默认"按钮（全部设备统一连续播/只播一次）；**坐姿统计**（选设备 × 时间范围 今日/本周/本月/今年/全部 → KPI 数字块 + 分桶柱形图 + 不良率折线 + 数据表，桶粒度：今日按小时、周/月按天、年/全部按月，口径与 posture_report.py 一致：不良率=不良帧/有效帧（桶级率随设备选择走：全部=合并、单台=该台）、不良事件按连续 BAD 间隔>5s 分段，60s 自动刷新+切换条件立即刷新）；检测时段设置（选全部设备=广播统一 / 选单台=只改它，等价 `s` / `s @ID` 命令，卡内显示各设备当前调度状态）；**图像保存设置**（保存开关与抽稀间隔——0=不保存、1=每帧、N=每 N 帧；关键点叠加开关；**仅有人帧**开关——该设备最近结果连续 50 帧无效（没人/太远/不可信）即停存空场景帧、恢复有人立即续存，PC 端判定不动 ESP；全部设备默认 + 按设备覆盖，等价 `img` 命令含 `img people on|off`，持久化 `recv_settings.json`）；**不良提醒模式**（设备表"提醒"列下拉选择 连续播/只播一次，等价 `alert @ID repeat|once`；旧固件显示 —）；运行日志面板（print 镜像环形缓冲 300 行，可按设备过滤——行含 `[devid]` 即匹配）
-- **架构**：网页按钮 → `POST /api/cmd` → 接收器 `handle_command()`（与控制台键盘输入**完全同一条路径**，行为一致）；状态 → `GET /api/state`（`_web_state()` 快照）2s 轮询；统计 → `GET /api/stats?range=&device=`（`_web_stats()` 查历史库）60s 低频轮询；`web_ui.start(state_provider, cmd_dispatcher)` + `set_stats_provider()` 注入回调，与接收器解耦无循环依赖
+- **功能**：设备表（ID/IP/固件/检测时段/时间同步/**提醒**/**前倾阈值**（眼/耳 当前值，只读）/最新|待升级|离线，升级中那台显示下载进度条）+ 顶部 OTA 横幅（百分比/等待重启确认/排队数）+ 升级全部/逐台升级/自动检测开关 + "提醒默认"按钮（全部设备统一连续播/只播一次）；**坐姿统计**（选设备 × 时间范围 今日/本周/本月/今年/全部 → KPI 数字块 + 分桶柱形图 + 不良率折线 + 数据表，桶粒度：今日按小时、周/月按天、年/全部按月，口径与 posture_report.py 一致：不良率=不良帧/有效帧（桶级率随设备选择走：全部=合并、单台=该台）、不良事件按连续 BAD 间隔>5s 分段，60s 自动刷新+切换条件立即刷新）；检测时段设置（选全部设备=广播统一 / 选单台=只改它，等价 `s` / `s @ID` 命令，卡内显示各设备当前调度状态）；**检测阈值**（设备表"前倾阈值"列读当前值（眼/耳前倾比）；设置卡选全部设备=广播统一 / 单台=专属覆盖，四个数字输入（眼/耳前倾比 0.2~10 + 眼/耳歪头倾角 10~80 度）预填所选目标当前值，等价 `ratio` / `ratio @ID` 命令）；**图像保存设置**（保存开关与抽稀间隔——0=不保存、1=每帧、N=每 N 帧；关键点叠加开关；**仅有人帧**开关——该设备最近结果连续 50 帧无效（没人/太远/不可信）即停存空场景帧、恢复有人立即续存，PC 端判定不动 ESP；全部设备默认 + 按设备覆盖，等价 `img` 命令含 `img people on|off`，持久化 `recv_settings.json`）；**图像预览**（选设备显示该设备最新保存的 PNG——已含关键点/判断文字/时间戳叠加，默认 5s 自动刷新可暂停、显示文件名与抓拍时间，无图时提示原因；走 `GET /api/frame?device=<ID>` 返回该设备目录下时间戳最新的 PNG，设备名白名单校验防目录穿越、响应带 `X-Image-Name` 供前端显示抓拍时间 + `Cache-Control: no-store` 防缓存旧图；按需请求，不开页面不扫目录）；**不良提醒模式**（设备表"提醒"列下拉选择 连续播/只播一次，等价 `alert @ID repeat|once`；旧固件显示 —）；运行日志面板（print 镜像环形缓冲 300 行，可按设备过滤——行含 `[devid]` 即匹配）
+- **架构**：网页按钮 → `POST /api/cmd` → 接收器 `handle_command()`（与控制台键盘输入**完全同一条路径**，行为一致）；状态 → `GET /api/state`（`_web_state()` 快照）2s 轮询；统计 → `GET /api/stats?range=&device=`（`_web_stats()` 查历史库）60s 低频轮询；图像预览 → `GET /api/frame?device=`（读 `received_images/<ID>/` 最新 PNG，仅前端刷新时请求）；`web_ui.start(state_provider, cmd_dispatcher)` + `set_stats_provider()` 注入回调，与接收器解耦无循环依赖
 - **图表规范**（dataviz）：两系列分组柱形图 + 不良率折线同图，配色 #2a78d6（检测）/#eb6834（不良）/#1baf7a（不良率曲线）——参考调色板前三槽，validate_palette.js 全项通过（worst adjacent CVD ΔE 9.2；#1baf7a 对表面 2.74:1 的 WARN 由数据表/tooltip/右侧刻度缓解）；柱厚≤24px、顶部 4px 圆角、组内 2px 间隙、发丝实线网格、图例常驻（曲线用线形标记）、率曲线固定 0-100% 满量程+右侧独立小刻度（不随计数轴缩放）、null 桶断线、2px 线+白描边圆点、悬停整组提亮+提示框（值为主）、"数据表"折叠表格为免悬停孪生、文本用墨色不用系列色
 - 接收器原有键盘命令照常可用（`handle_command` 共用）；关掉网页不影响任何后台功能（收图/落库/OTA 自动检测）
 
@@ -91,6 +94,7 @@ app_main.c                    # 入口点 - 初始化所有子系统
 - I2S 标准模式，16kHz 采样率，单声道 16-bit
 - GPIO：BCLK=19, WS=20, DOUT=47
 - 播放 WiFi 状态提示音（连接成功/失败/重置），音频数据位于 `res/wifi_*.c`
+- **OTA 期间音频挂起**（`audio_player_suspend()` / `audio_player_resume()`，由 `udp_camera_client.c` 的 OTA 任务调用）：置标志让播放循环写完当前块即退出 + 写静音清 DMA + 关 I2S 通道（BCLK/WS 停止 → MAX98357 停止转换），挂起期间所有播放请求直接拒绝。**为什么需要**：I2S 通道自 `audio_player_init()` 起常开，而未播完的提示音（如"WiFi 已连接"1.22s）在 OTA 期间会被 flash 擦写（每 4KB 扇区擦除短暂停用 cache）拖长——每块之间停顿几百 ms、DMA 反复饿死，每次接缝一个阶跃，表现为**整个 OTA 过程喇叭持续"哒哒"响**。注意这是旧固件的行为，升级到含此修复的固件后消失
 
 ### 坐姿检测模型
 
@@ -120,19 +124,20 @@ app_main.c                    # 入口点 - 初始化所有子系统
 - 输出 layout 按 `output_shape` 自适应（NHWC/NCHW 均支持，启动日志会打印 `chan_dim`）
 - 置信度阈值：眼/耳 `CONF_THRESH=0.4`，双肩单独 `SHOULDER_CONF_THRESH=0.3`（趴近时肩 conf 偏低但仍需作基准）
 
-**姿态判断逻辑（4 条标准任意成立即不良，阈值均为宏，见 `main/posture_model.cpp`）：**
+**姿态判断逻辑（4 条标准任意成立即不良，见 `main/posture_model.cpp`；前倾比/歪头倾角阈值运行时可配，其余为宏）：**
 - 可信前提：双肩均可见 && 双眼或双耳可见，否则 `POSTURE_NOT_DETECTED`
 - 距离门限：双肩间距（归一化）< `SHOULDER_DIST_MIN`（默认 0.19）→ `POSTURE_TOO_FAR` 本帧不判断（人太远时 heatmap 定位噪声占比过大，远距离误报根源；阈值需据远距离日志标定）
 - 几何合理性预检（防误检误报）：同组连线（双肩/双眼/双耳）|倾斜角| > `*_LINE_TILT_MAX`（默认 40°，近垂直属明显误检）→ 双肩误检或眼+耳全误检判 `POSTURE_UNRELIABLE`（本帧不判断、不播提示音）；仅一组头部误检则跳过该组条件、用另一组照常判断
-- `POSTURE_BAD_NECK`（前倾）：眼肩垂直距离/双眼距 < `EYE_FORWARD_RATIO_MIN`，或 耳肩垂直距离/双耳距 < `EAR_FORWARD_RATIO_MIN`
-- `POSTURE_BAD_SHOULDER`（歪头）：双眼-双肩相对倾斜角 > `EYE_HEAD_TILT_WARN`，或 双耳-双肩相对倾斜角 > `EAR_HEAD_TILT_WARN`
+- `POSTURE_BAD_NECK`（前倾）：眼肩垂直距离/双眼距 < `posture_ratio_eye_min()`，或 耳肩垂直距离/双耳距 < `posture_ratio_ear_min()`（**运行时可配**：`posture_sched.c` NVS 持久化（psched/eye_ratio、ear_ratio，u16 存百分之一），上电读取默认 1.5；20003 的 `ESPCAM_RATIO_SET`/网页"检测阈值"卡/`ratio` 命令按设备设置，合法范围 0.2~10）
+- `POSTURE_BAD_SHOULDER`（歪头）：双眼-双肩相对倾斜角 > `posture_tilt_eye_max()`，或 双耳-双肩相对倾斜角 > `posture_tilt_ear_max()`（**同样运行时可配**：NVS psched/eye_tilt、ear_tilt，u16 存十分之一度，上电读取默认 眼 20 / 耳 15；与前倾比同一命令/卡片/记忆设置，合法范围 10~80 度）
 - 头部定位：双眼优先，眼不可见时用双耳兜底
-- 不良语音提示：连续 `POSTURE_ALERT_CONSECUTIVE`（`app_main.c`，默认 2）帧不良才触发 `audio_player_play_posture_alert()` 播放 `res/bad_pose.mp3`（中断重新计数；UDP 逐帧 result 不受影响）。**提醒模式**（`posture_alert_repeat_enabled()`，NVS 持久化，20003/网页可设，默认连续播）：连续播=不良持续则每帧播完接着播（播放阻塞式天然背靠背）；只播一次=每轮不良事件仅首次播、恢复后才可再触发
+- 不良语音提示：连续 `POSTURE_ALERT_CONSECUTIVE`（`app_main.c`，默认 2）帧不良才触发 `audio_player_play_posture_alert()` 播放 `res/bad_pose.mp3`（中断重新计数；UDP 逐帧 result 不受影响）。**提醒模式**（`posture_alert_get_mode()` 三态，NVS 持久化，20003/网页可设，默认连续播）：连续播=不良持续则每帧播完接着播（播放阻塞式天然背靠背）；只播一次=每轮不良事件仅首次播、恢复后才可再触发；关闭=不播语音（检测与 UDP 结果上报照常）
 
 ### 检测时间段调度（`main/posture_sched.c`）
 
 - 最多 5 个每日重复时段，[start, end) 左闭右开，支持跨午夜（start > end 如 22:00-06:30）；0 段 = 全天检测
 - 设置经 20003 端口下发（见上），写入 NVS（namespace `psched`，key `slots`），断电重启后仍生效
+- 同文件还持久化三类运行时设置（同 namespace `psched`）：不良提醒模式（key `alert_rep`，0|1|2 三态）、眼/耳前倾比阈值（key `eye_ratio`/`ear_ratio`，u16 存百分之一）与 眼/耳歪头倾角阈值（key `eye_tilt`/`ear_tilt`，u16 存十分之一度），上电读取
 - **时间未同步（SNTP 未完成）或未设置时段时全部检测**（降级策略）；同步完成瞬间推送状态（经标志位由 20003 任务代发，见 20003 协议说明——SNTP 回调上下文禁止直接 sendto）
 - 窗口外推理任务不取帧不推理不发送（5s 低频轮询等待进窗），进入/离开窗口有边沿日志
 
@@ -148,9 +153,9 @@ app_main.c                    # 入口点 - 初始化所有子系统
 | `main/wifi_config_manager.c` | 强制门户，NVS 凭据存储             |
 | `main/udp_camera_client.c`   | UDP 图像/音频发送和接收任务、20003 发现/调度/OTA |
 | `main/time_sync.c`           | SNTP 网络对时（拿到 IP 自动同步，CST-8） |
-| `main/posture_sched.c`       | 检测时间段调度 + 不良提醒模式（NVS 持久化、跨午夜、未同步全检测） |
+| `main/posture_sched.c`       | 检测时间段调度 + 不良提醒模式 + 检测阈值（前倾比/歪头倾角，NVS 持久化、跨午夜、未同步全检测） |
 | `simple_udp_receiver.py`     | PC 端接收器：图像/结果接收叠加、发现+调度下发（交互命令 s）、OTA 命令、历史落库（SQLite）；图像按设备分目录抽稀保存 `received_images/<设备ID>/`（`img` 命令/Web 可设叠加开关、抽稀间隔与仅有人帧开关：全部默认+按设备覆盖，recv_settings.json 持久化） |
-| `web_ui.py`                  | Web 控制台（:20005）：设备表/OTA 按钮/坐姿统计图表（设备×时间范围）/时段设置/日志面板，复用接收器命令路径 |
+| `web_ui.py`                  | Web 控制台（:20005）：设备表/OTA 按钮/坐姿统计图表（设备×时间范围）/时段设置/图像预览（最新保存帧）/日志面板，复用接收器命令路径 |
 | `posture_report.py`          | 坐姿历史报告：多时间窗统计 + 趋势图（matplotlib） |
 | `raspberry_pi_deploy.md`     | 树莓派部署指南（依赖/systemd 服务/自启管理/OTA 注意点） |
 | `espcam.service`             | systemd 服务配置（开机自启+崩溃拉起，配合上面的指南使用） |
@@ -170,6 +175,8 @@ app_main.c                    # 入口点 - 初始化所有子系统
 ### 开发板配置
 
 `CAMERA_MODEL_ESP32S3_EYE` 在 `sdkconfig.defaults` 中定义。摄像头引脚（XCLK=GPIO15, SIOD=GPIO4, SIOC=GPIO5 等）在 `main/camera_app.h` 中定义。
+
+**sdkconfig 已入库**（单开发者项目，保留 menuconfig 手动改动，如 PSRAM 八线模式/优化等级；曾因不入库在换机器时从 defaults 重新生成而丢配置）。`sdkconfig.defaults` 仍需与关键配置保持同步作为兜底。已踩过的坑：PSRAM 八线模式（`CONFIG_SPIRAM_MODE_OCT=y`，S3-EYE 模组为 Octal PSRAM；缺省生成的 QUAD 会报 `quad_psram: PSRAM chip is not connected` → `Failed to init external RAM` 直接 abort）；编译优化需 PERF（`-Og` 会触发 GCC 15.2 编译 esp_lcd 的 internal compiler error，且拖慢推理）。
 
 ### 内存限制（重要）
 

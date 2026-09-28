@@ -9,6 +9,6 @@
 #ifndef __APP_VERSION_H__
 #define __APP_VERSION_H__
 
-#define APP_VERSION "20260919_2"
+#define APP_VERSION "20260927_2"
 
 #endif  // __APP_VERSION_H__

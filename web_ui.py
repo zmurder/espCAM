@@ -20,6 +20,8 @@ CVD ΔE 24.7、对白底对比度 ≥3:1，validate_palette.js 全项通过）�
 import builtins
 import collections
 import json
+import os
+import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -151,6 +153,9 @@ _PAGE = """<!doctype html>
   details.tbl summary { color: #6b7280; cursor: pointer; font-size: 12px; }
   details.tbl table td, details.tbl table th { font-variant-numeric: tabular-nums; }
   .empty-chart { color: #9ca3af; text-align: center; padding: 34px 0; font-size: 13px; }
+  #prevBox { min-height: 60px; text-align: center; }
+  #prevBox img { display: block; margin: 0 auto; max-width: min(100%, 640px); height: auto;
+                 border-radius: 8px; border: 1px solid #e5e7eb; cursor: zoom-in; }
 </style>
 </head>
 <body>
@@ -174,11 +179,11 @@ _PAGE = """<!doctype html>
       </span>
     </h2>
     <table>
-      <thead><tr><th>#</th><th>设备 ID</th><th>IP</th><th>固件</th><th>检测时段</th><th>时间同步</th><th>提醒</th><th>状态</th><th style="text-align:right">操作</th></tr></thead>
+      <thead><tr><th>#</th><th>设备 ID</th><th>IP</th><th>固件</th><th>检测时段</th><th>时间同步</th><th>提醒</th><th>前倾阈值</th><th>状态</th><th style="text-align:right">操作</th></tr></thead>
       <tbody id="devRows"></tbody>
     </table>
     <div class="empty" id="devEmpty" style="display:none">暂无设备应答（等待 2s 发现周期…）</div>
-    <div class="sched-hint">提醒列下拉选择该设备的不良语音模式（连续播/只播一次，写入 ESP NVS 断电保持，切换后以 ESP 确认回执为准）；"提醒默认"按钮统一下发全部设备。旧固件该列显示 —，OTA 升级后可用。</div>
+    <div class="sched-hint">提醒列下拉选择该设备的不良语音模式（连续播/只播一次/关闭——关闭仅停语音播报，检测与上报照常；写入 ESP NVS 断电保持，切换后以 ESP 确认回执为准）；"提醒默认"按钮三档循环统一下发全部设备。前倾阈值列显示 眼/耳 当前判断阈值（修改见下方"前倾比阈值"卡）。旧固件两列显示 —，OTA 升级后可用。</div>
   </div>
 
   <div class="card">
@@ -219,6 +224,33 @@ _PAGE = """<!doctype html>
   </div>
 
   <div class="card">
+    <h2>检测阈值（前倾比 + 歪头角度）</h2>
+    <div class="sched-now" id="ratioNow">—</div>
+    <div class="filter-row" style="margin-bottom:10px">
+      <select id="ratioDev" onchange="renderRatio(cur)"></select>
+    </div>
+    <div class="filter-row">
+      <span class="lbl">前倾比</span>
+      <span class="lbl">眼</span>
+      <input type="number" id="eyeThrInput" min="0.2" max="10" step="0.05">
+      <span class="lbl">耳</span>
+      <input type="number" id="earThrInput" min="0.2" max="10" step="0.05">
+    </div>
+    <div class="filter-row">
+      <span class="lbl">歪头角</span>
+      <span class="lbl">眼</span>
+      <input type="number" id="eyeTiltInput" min="10" max="80" step="1">
+      <span class="lbl">耳</span>
+      <input type="number" id="earTiltInput" min="10" max="80" step="1">
+      <button class="mini primary" onclick="applyRatio()">下发设置</button>
+      <button class="mini" onclick="fillRatioDefault()">填入默认</button>
+    </div>
+    <div class="sched-hint">前倾比：眼/耳-肩垂直距离 ÷ 双眼/耳距 &lt; 阈值 → 前倾不良（0.2~10，默认眼 1.2 / 耳 0.7，越小越宽松）；
+      歪头角：头-肩相对倾斜角 &gt; 阈值 → 歪头不良（10~80 度，默认眼 20 / 耳 15，越小越严格）。写入 ESP NVS 断电保持。
+      选"全部设备"= 统一所有设备（各台专属被清除）；选单台 = 只改它，重启接收器后仍会自动恢复。旧固件显示 —</div>
+  </div>
+
+  <div class="card">
     <h2>图像保存
       <span>
         <button class="mini" id="imgSaveBtn" onclick="toggleImgSave()">保存图片: ?</button>
@@ -239,6 +271,19 @@ _PAGE = """<!doctype html>
     <div class="sched-now" id="imgNow" style="margin:10px 0 0">—</div>
     <div class="sched-hint">选"全部设备"=改默认（该字段各台专属被统一清除）；选单台=只改它（恢复默认=清除专属跟随默认）。
       0=不保存图片；1=每帧都存；"保存图片"开关=0 与 10 快捷切换；叠加含关键点连线/判断文字/时间戳；持久保存（recv_settings.json）</div>
+  </div>
+
+  <div class="card">
+    <h2>图像预览（最新保存帧）
+      <span>
+        <select id="prevDev" onchange="onPrevDev()"></select>
+        <button class="mini" id="prevPlayBtn" onclick="togglePreview()">暂停刷新</button>
+      </span>
+    </h2>
+    <div id="prevBox"><div class="empty-chart">选择设备后显示该设备最新保存的图片…</div></div>
+    <div class="sched-now" id="prevMeta" style="margin:8px 0 0">—</div>
+    <div class="sched-hint">显示该设备最近一次保存的 PNG（已含关键点/判断文字/时间戳叠加），默认每 5s 自动刷新。
+      看不到图时确认"图像保存"设置：设为 0 不保存、开了"仅有人帧"且当前无人也不存（此时无新图可预览）。</div>
   </div>
 
   <div class="card">
@@ -298,6 +343,52 @@ function fillDevs(sel) {
   }
 }
 
+/* ---------- 图像预览（/api/frame：该设备最新保存帧，已含关键点叠加） ---------- */
+let prevTimer = null, prevOn = true, prevUrl = null, prevInited = false;
+
+function onPrevDev() { loadPreview(); restartPreview(); }
+function togglePreview() {
+  prevOn = !prevOn;
+  document.getElementById('prevPlayBtn').textContent = prevOn ? '暂停刷新' : '继续刷新';
+  if (prevOn) restartPreview(); else stopPreview();
+}
+function stopPreview() { if (prevTimer) { clearInterval(prevTimer); prevTimer = null; } }
+function restartPreview() { stopPreview(); if (prevOn) prevTimer = setInterval(loadPreview, 5000); }
+
+function nameToTime(n) {  // image_20260928_143000_123.png → 2026-09-28 14:30:00
+  const m = /image_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/.exec(n || '');
+  return m ? `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}` : '';
+}
+
+async function loadPreview() {
+  const box = document.getElementById('prevBox'), meta = document.getElementById('prevMeta');
+  const dev = document.getElementById('prevDev').value;
+  if (!dev) return;
+  if (dev === 'all') {  // 图片按设备分目录保存，"全部设备"下只能提示选具体设备
+    box.innerHTML = '<div class="empty-chart">请选择具体设备（图片按设备分目录保存）</div>';
+    meta.textContent = '—';
+    return;
+  }
+  try {
+    const r = await fetch('/api/frame?device=' + encodeURIComponent(dev) + '&t=' + Date.now());
+    if (!r.ok) {
+      box.innerHTML = '<div class="empty-chart">该设备暂无保存的图片<br>' +
+        '（"图像保存"设为 0、或开启"仅有人帧"而当前无人、或尚未到抽稀帧）</div>';
+      meta.textContent = '无图片（HTTP ' + r.status + '）';
+      return;
+    }
+    const name = r.headers.get('X-Image-Name') || '';
+    const blob = await r.blob();
+    if (prevUrl) URL.revokeObjectURL(prevUrl);  // 释放上一张，避免内存堆积
+    prevUrl = URL.createObjectURL(blob);
+    box.innerHTML = '<img alt="最新保存帧" title="点击查看原图" onclick="if(prevUrl) window.open(prevUrl)">';
+    box.firstChild.src = prevUrl;
+    meta.textContent = [name, nameToTime(name), (blob.size / 1024).toFixed(0) + ' KB'].filter(Boolean).join(' · ');
+  } catch (e) {
+    meta.textContent = '加载失败: ' + e;
+  }
+}
+
 let lastDevRows = '';  // 上次设备表 HTML（无变化不重绘，见 render）
 
 function render(s) {
@@ -307,7 +398,7 @@ function render(s) {
     ? `${online.length} 台设备在线 · ${act.length} 台检测中` : '暂无设备在线（等待 2s 发现周期…）';
   document.getElementById('fwbadge').textContent = '目标固件 ' + (s.fw_version || '?');
   document.getElementById('watchBtn').textContent = '自动检测: ' + (s.watch ? '开' : '关');
-  document.getElementById('alertDefBtn').textContent = '提醒默认: ' + (s.alert_default ? '连续播' : '只播一次');
+  document.getElementById('alertDefBtn').textContent = '提醒默认: ' + ({1: '连续播', 0: '只播一次', 2: '关闭'}[s.alert_default] || '?');
   const banner = document.getElementById('otaBanner');
   if (s.ota_current) {
     banner.style.display = 'block';
@@ -343,12 +434,16 @@ function render(s) {
     // 不良提醒模式下拉（ACK 上报当前值；选择后等 ESP 回 ALERT_STATE 确认才跳新值；旧固件未上报 → —）
     const alert = d.alert == null ? '<span class="dim">—</span>'
       : `<select class="cell-sel" onchange="setAlert('${esc(d.id)}', this.value)">` +
-        `<option value="repeat"${d.alert ? ' selected' : ''}>连续播</option>` +
-        `<option value="once"${d.alert ? '' : ' selected'}>只播一次</option></select>`;
+        `<option value="repeat"${d.alert === 1 ? ' selected' : ''}>连续播</option>` +
+        `<option value="once"${d.alert === 0 ? ' selected' : ''}>只播一次</option>` +
+        `<option value="off"${d.alert === 2 ? ' selected' : ''}>关闭</option></select>`;
+    // 前倾比阈值 眼/耳（ACK 上报当前值，只读展示，修改在"前倾比阈值"卡；旧固件未上报 → —）
+    const ratio = (d.eye_thr == null || d.ear_thr == null) ? '<span class="dim">—</span>'
+      : esc(d.eye_thr.toFixed(2)) + ' / ' + esc(d.ear_thr.toFixed(2));
     const act2 = (d.online && !d.up_to_date)
       ? `<button class="mini primary" onclick="cmd('ota ${esc(d.id)}')">升级</button>` : '';
     return `<tr><td>${i + 1}</td><td>${esc(d.id)}</td><td>${esc(d.ip || '—')}</td>` +
-           `<td>${esc(d.ver || '?')}</td><td>${sched}</td><td>${sync}</td><td>${alert}</td><td>${st}</td><td style="text-align:right">${act2}</td></tr>`;
+           `<td>${esc(d.ver || '?')}</td><td>${sched}</td><td>${sync}</td><td>${alert}</td><td>${ratio}</td><td>${st}</td><td style="text-align:right">${act2}</td></tr>`;
   }).join('');
   // 内容无变化不重绘：避免 2s 轮询把用户正在展开的下拉/悬停状态打断
   if (rowsHtml !== lastDevRows) { tb.innerHTML = rowsHtml; lastDevRows = rowsHtml; }
@@ -362,6 +457,14 @@ function render(s) {
 
   fillDevs(document.getElementById('schedDev'));
   fillDevs(document.getElementById('logDev'));
+  const psel = document.getElementById('prevDev');
+  fillDevs(psel);
+  if (!prevInited && (s.devices || []).length) {  // 首次自动选第一台：停在"全部设备"看不到图
+    psel.value = s.devices[0].id;
+    prevInited = true;
+  }
+  if (!prevTimer && prevOn) { loadPreview(); restartPreview(); }  // 首次出图 + 启动 5s 自动刷新
+  renderRatio(s);
   renderImg(s);
   renderLog(s);
 }
@@ -385,6 +488,48 @@ function setSlots() {
   if (v) cmd('s ' + schedTarget() + v);
 }
 function clearSlots() { cmd('s ' + schedTarget() + 'clear'); }
+
+/* ---------- 检测阈值（前倾比 + 歪头角：全部设备默认 + 按设备覆盖，等价 ratio 命令） ---------- */
+function ratioTarget() {  // 'all' → ''（广播全部设备）；单台 → '@ID '（单播）
+  const d = document.getElementById('ratioDev').value;
+  return d && d !== 'all' ? '@' + d + ' ' : '';
+}
+function applyRatio() {  // 范围本地预校验（与 ESP 一致），不合法不下发
+  const e = parseFloat(document.getElementById('eyeThrInput').value);
+  const r = parseFloat(document.getElementById('earThrInput').value);
+  const t1 = parseFloat(document.getElementById('eyeTiltInput').value);
+  const t2 = parseFloat(document.getElementById('earTiltInput').value);
+  if (!(e >= 0.2 && e <= 10) || !(r >= 0.2 && r <= 10)) {
+    alert('前倾比阈值须在 0.2~10 之间（默认 1.5）'); return;
+  }
+  if (!(t1 >= 10 && t1 <= 80) || !(t2 >= 10 && t2 <= 80)) {
+    alert('歪头倾角阈值须在 10~80 度之间（默认 眼 20 / 耳 15）'); return;
+  }
+  cmd('ratio ' + ratioTarget() + e + ' ' + r + ' ' + t1 + ' ' + t2);
+}
+function fillRatioDefault() {  // 把默认值填入输入框（不直接下发，确认后点"下发设置"）
+  document.getElementById('eyeThrInput').value = 1.5;
+  document.getElementById('earThrInput').value = 1.5;
+  document.getElementById('eyeTiltInput').value = 35;
+  document.getElementById('earTiltInput').value = 35;
+}
+function renderRatio(s) {  // 当前生效值 + 输入框预填所选目标的当前阈值（正在输入时不打扰）
+  fillDevs(document.getElementById('ratioDev'));
+  const t = document.getElementById('ratioDev').value;
+  const dflt = s.ratio_default || [1.2, 0.7, 20, 15];
+  const dev = (s.devices || []).find(x => x.id === t);
+  const has = dev && dev.eye_thr != null && dev.ear_thr != null;
+  const ve = has ? dev.eye_thr : +dflt[0];
+  const vr = has ? dev.ear_thr : +dflt[1];
+  const vt1 = dev && dev.eye_tilt != null ? dev.eye_tilt : +dflt[2];
+  const vt2 = dev && dev.ear_tilt != null ? dev.ear_tilt : +dflt[3];
+  document.getElementById('ratioNow').innerHTML = has
+    ? `当前: ${esc(t)} 眼&lt;${ve.toFixed(2)} 耳&lt;${vr.toFixed(2)} 倾角${vt1.toFixed(0)}°/${vt2.toFixed(0)}°`
+    : `当前: 默认 眼&lt;${ve.toFixed(2)} 耳&lt;${vr.toFixed(2)} 倾角${vt1.toFixed(0)}°/${vt2.toFixed(0)}°` +
+      (dev ? ' <span class="dim">（旧固件未上报）</span>' : '');
+  const f = (id, v) => { const el = document.getElementById(id); if (document.activeElement !== el) el.value = v; };
+  f('eyeThrInput', ve); f('earThrInput', vr); f('eyeTiltInput', vt1); f('earTiltInput', vt2);
+}
 
 /* ---------- 图像保存（抽稀/叠加：全部设备默认 + 按设备覆盖，等价 img 命令） ---------- */
 function imgTarget() {  // 'all' → ''（全部设备）；单台 → '@ID '
@@ -426,8 +571,9 @@ function renderImg(s) {
     ).join('') || '—';
 }
 function toggleWatch() { cmd(cur.watch ? 'ota off' : 'ota on'); }
-function toggleAlertDef() {  // 全部设备统一下发（等价键盘命令 alert repeat|once，清掉各台专属）
-  cmd(cur.alert_default ? 'alert once' : 'alert repeat');
+function toggleAlertDef() {  // 全部设备统一下发（清掉各台专属）：三档循环 连续播→只播一次→关闭→连续播
+  const next = {1: 'once', 0: 'off', 2: 'repeat'}[cur.alert_default ?? 1] || 'once';
+  cmd('alert ' + next);
 }
 function setAlert(id, v) { cmd('alert @' + id + ' ' + v); }  // 设备表"提醒"下拉（等价 alert @ID repeat|once）
 function toggleLog(btn) {
@@ -630,6 +776,36 @@ setInterval(loadStats, 60000);  // 统计低频刷新（SQL 全窗扫描，不�
 """
 
 
+# ---------- 图像预览：最新保存帧（received_images/<设备ID>/image_<时间戳>.png）----------
+
+_IMG_ROOT = "received_images"  # 与接收器同 cwd：图片落在启动目录下
+_DEV_DIR_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")  # 设备目录名白名单（device 来自 URL，防目录穿越）
+
+
+def _latest_image(devid=""):
+    """返回最新一张保存帧的路径（文件名 image_YYYYmmdd_HHMMSS_mmm.png，字典序即时间序）。
+    devid 为空 = 所有设备目录里最新的；无图/目录不存在 → None"""
+    if devid:
+        if not _DEV_DIR_RE.fullmatch(devid):
+            return None
+        dirs = [os.path.join(_IMG_ROOT, devid)]
+    else:
+        try:
+            dirs = [e.path for e in os.scandir(_IMG_ROOT) if e.is_dir()]
+        except OSError:
+            return None
+    best_name, best_path = "", None
+    for d in dirs:
+        try:
+            with os.scandir(d) as it:
+                for e in it:
+                    if e.name.endswith(".png") and e.name > best_name:
+                        best_name, best_path = e.name, e.path
+        except OSError:
+            continue
+    return best_path
+
+
 class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"  # keep-alive（Content-Length 恒有，安全）
 
@@ -666,6 +842,26 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 snap = {"error": str(e), "buckets": [], "devices": [], "summary": {}}
             self._send(200, json.dumps(snap, ensure_ascii=False), "application/json; charset=utf-8")
+        elif self.path.startswith("/api/frame"):
+            # 最新保存帧（已含关键点叠加与时间戳）：前端 fetch 成 blob 显示，避免浏览器缓存旧图
+            q = parse_qs(urlparse(self.path).query)
+            path = _latest_image((q.get("device") or [""])[0])
+            if not path:
+                self._send(404, "尚无保存的图片", "text/plain; charset=utf-8")
+                return
+            try:
+                with open(path, "rb") as f:
+                    data = f.read()
+            except OSError as e:
+                self._send(500, f"读取失败: {e}", "text/plain; charset=utf-8")
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store, must-revalidate")  # 每次都要最新帧
+            self.send_header("X-Image-Name", os.path.basename(path))        # 前端据此显示抓拍时间
+            self.end_headers()
+            self.wfile.write(data)
         else:
             self._send(404, "not found", "text/plain; charset=utf-8")
 
@@ -691,6 +887,14 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(200, '{"ok": true}', "application/json; charset=utf-8")
 
 
+class _QuietWebServer(ThreadingHTTPServer):
+    """浏览器刷新/关闭时在途的 /api/state 轮询连接被掐断属正常——
+    静默为一行提示，不打整段 traceback（与接收器 OTA 服务的 _QuietHTTPServer 同一套路）"""
+
+    def handle_error(self, request, client_address):
+        print(f"[web] HTTP 连接中断（{client_address[0]}，页面刷新/关闭时正常）")
+
+
 def start(state_provider, cmd_dispatcher, port=WEB_PORT):
     """启动 Web 控制台（在接收器 __main__ 里调用一次）：
     state_provider: () → 状态快照 dict；cmd_dispatcher: (str) → 处理一条命令（与键盘输入同路径）；
@@ -700,7 +904,7 @@ def start(state_provider, cmd_dispatcher, port=WEB_PORT):
     _cmd_dispatcher = cmd_dispatcher
     _install_mirror()  # 先装 print 镜像再启其他线程，启动日志也能进网页
     try:
-        httpd = ThreadingHTTPServer(("0.0.0.0", port), _Handler)
+        httpd = _QuietWebServer(("0.0.0.0", port), _Handler)
     except OSError as e:
         print(f"[web] 端口 {port} 启动失败: {e}（Web 控制台不可用，其余功能不受影响）")
         return

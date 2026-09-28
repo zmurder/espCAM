@@ -111,6 +111,16 @@ esp_err_t wifi_register_event_handlers(EventGroupHandle_t event_group);
 esp_err_t wifi_unregister_event_handlers(void);
 
 /**
+ * @brief 开/关 STA 断线自动重连（手动连接流程期间临时抑制）
+ *
+ * 手动连接流程（wifi_connect_to_ap）要先 esp_wifi_disconnect 再 scan/set_config，
+ * 若不抑制，断开事件会触发本模块 handler 自动 esp_wifi_connect，IDF 6.x 驱动在
+ * "连接中"状态会拒绝 scan/set_config（ESP_ERR_WIFI_STATE）→ 手动流程误判连接失败
+ * → 误入配网模式并清空 NVS 凭据。enable=true 时同时清零重试计数。
+ */
+void wifi_manager_set_sta_autoretry(bool enable);
+
+/**
  * @brief Get the WiFi event group handle
  *
  * @return EventGroupHandle_t pointer to the WiFi event group

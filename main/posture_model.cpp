@@ -13,8 +13,8 @@
  * - 每通道 int8 argmax，conf = max_int8 × 2^exponent（Sigmoid 输出，已在 [0,1]）
  * - 置信度阈值：眼/耳 conf<0.4、双肩 conf<0.2 视为不可信；layout 按 output_shape 自适应（NHWC/NCHW）
  * - 坐姿判断（4 条任意成立即不良，详见 judge_posture）：
- *   前倾(NECK) = 眼肩垂直距离/双眼距 或 耳肩垂直距离/双耳距 < FORWARD_RATIO 阈值（EYE/EAR_FORWARD_RATIO_MIN）；
- *   歪头(SHOULDER) = 双眼/双耳-双肩相对倾斜角 > HEAD_TILT_WARN 阈值（EYE/EAR_HEAD_TILT_WARN）
+ *   前倾(NECK) = 眼肩垂直距离/双眼距 或 耳肩垂直距离/双耳距 < FORWARD_RATIO 阈值（posture_ratio_eye/ear_min，运行时可配）；
+ *   歪头(SHOULDER) = 双眼/双耳-双肩相对倾斜角 > HEAD_TILT_WARN 阈值（posture_tilt_eye/ear_max，运行时可配）
  * - 几何合理性预检：同组连线（双肩/双眼/双耳）近垂直属明显误检，超阈本帧不判断（POSTURE_UNRELIABLE）
  * - 距离门限：肩距过小（人太远）→ 定位误差占比过大，本帧不判断（POSTURE_TOO_FAR）
  */
@@ -30,6 +30,7 @@
 #include "dl_image_preprocessor.hpp"
 #include "dl_model_base.hpp"
 #include "posture_model.h"
+#include "posture_sched.h"  // 前倾比阈值（运行时可配，NVS 持久化，20003 下发）
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -61,12 +62,10 @@ static const std::array<float, 3> IMAGENET_MEAN = {123.675f, 116.28f, 103.53f};
 static const std::array<float, 3> IMAGENET_STD = {58.395f, 57.12f, 57.375f};
 
 // 坐姿判断阈值（不良坐姿：下列 4 条任意成立即触发；详见 judge_posture）
+// 条件1/2 的眼/耳前倾比阈值与条件3/4 的眼/耳歪头倾角阈值运行时可配
+//（posture_sched.c，NVS 持久化，20003/网页可设，默认眼 1.2 / 耳 0.7 / 35°），其余阈值仍为编译期宏
 #define CONF_THRESH 0.4f            // 关键点置信度阈值（眼/耳，<此值视为不可信）
 #define SHOULDER_CONF_THRESH 0.3f   // 双肩单独阈值（更低；趴近时肩 conf 偏低但仍需作为参考基准）
-#define EYE_FORWARD_RATIO_MIN 1.5f  // 条件1：眼肩垂直距离/双眼距离 < 此值 → 前倾（需据正常坐姿日志标定）
-#define EAR_FORWARD_RATIO_MIN 1.5f  // 条件2：耳肩垂直距离/双耳距离 < 此值 → 前倾（需据正常坐姿日志标定）
-#define EYE_HEAD_TILT_WARN 35.0f    // 条件3：双眼-双肩相对倾斜角 > 此值 → 歪头（度）
-#define EAR_HEAD_TILT_WARN 35.0f    // 条件4：双耳-双肩相对倾斜角 > 此值 → 歪头（度）
 // 几何合理性预检（防误检误报）：正常坐姿下同组连线接近水平，|倾斜角| 超阈（如接近垂直）视为明显误检
 #define SHOULDER_LINE_TILT_MAX 40.0f  // 双肩连线 |倾斜角| > 此值 → 双肩误检，本帧不判断（度）
 #define EYE_LINE_TILT_MAX 40.0f       // 双眼连线 |倾斜角| > 此值 → 该组误检，跳过眼条件（度）
@@ -162,11 +161,11 @@ static inline float normalize_tilt(float deg)
 //  关键点属明显误检（如连线近垂直）→ POSTURE_UNRELIABLE 本帧不判断；仅一组头部连线不合理则跳过该组条件。
 //  距离门限：肩距（归一化）过小 → 人太远，heatmap 定位误差占比过大 → POSTURE_TOO_FAR 本帧不判断。
 //  前倾(BAD_NECK)：
-//   1) 眼肩垂直距离 / 双眼距离 < EYE_FORWARD_RATIO_MIN   （双眼可见时评估）
-//   2) 耳肩垂直距离 / 双耳距离 < EAR_FORWARD_RATIO_MIN   （双耳可见时评估）
+//   1) 眼肩垂直距离 / 双眼距离 < posture_ratio_eye_min()（双眼可见时评估；运行时可配，默认 1.2）
+//   2) 耳肩垂直距离 / 双耳距离 < posture_ratio_ear_min()（双耳可见时评估；运行时可配，默认 0.7）
 //  歪头(BAD_SHOULDER)：
-//   3) 双眼-双肩相对倾斜角 > EYE_HEAD_TILT_WARN          （双眼可见时评估）
-//   4) 双耳-双肩相对倾斜角 > EAR_HEAD_TILT_WARN          （双耳可见时评估）
+//   3) 双眼-双肩相对倾斜角 > posture_tilt_eye_max()（双眼可见时评估；运行时可配，默认 20°）
+//   4) 双耳-双肩相对倾斜角 > posture_tilt_ear_max()（双耳可见时评估；运行时可配，默认 15°）
 static posture_result_t judge_posture(posture_keypoint_data_t* kp, float* out_ratio, float* out_shoulder_tilt, float* out_head_tilt, int* out_head_source)
 {
     // 可见性（成对）。双肩用单独更低阈值：趴近时肩 conf 偏低，但仍需作为垂直距离/相对角度的基准
@@ -243,10 +242,10 @@ static posture_result_t judge_posture(posture_keypoint_data_t* kp, float* out_ra
         *out_head_source = HEAD_SRC_EYES;
         *out_head_tilt = eye_head_rel;
         *out_ratio = eye_forward_ratio;
-        ESP_LOGI(TAG, "  [eye] forward_ratio=%.2f (thr<%.2f)  head_rel=%.1f (thr>%.1f)", eye_forward_ratio, (double)EYE_FORWARD_RATIO_MIN, eye_head_rel, (double)EYE_HEAD_TILT_WARN);
+        ESP_LOGI(TAG, "  [eye] forward_ratio=%.2f (thr<%.2f)  head_rel=%.1f (thr>%.1f)", eye_forward_ratio, (double)posture_ratio_eye_min(), eye_head_rel, (double)posture_tilt_eye_max());
 
-        if (eye_forward_ratio < EYE_FORWARD_RATIO_MIN) return POSTURE_BAD_NECK;     // 条件1
-        if (fabsf(eye_head_rel) > EYE_HEAD_TILT_WARN) return POSTURE_BAD_SHOULDER;  // 条件3
+        if (eye_forward_ratio < posture_ratio_eye_min()) return POSTURE_BAD_NECK;   // 条件1
+        if (fabsf(eye_head_rel) > posture_tilt_eye_max()) return POSTURE_BAD_SHOULDER;  // 条件3
     }
 
     // 条件 2 & 4：双耳连线可用 → 前倾比 + 歪头角（与双眼平行评估；眼不可用时兜底）
@@ -263,10 +262,10 @@ static posture_result_t judge_posture(posture_keypoint_data_t* kp, float* out_ra
             *out_head_tilt = ear_head_rel;
             *out_ratio = ear_forward_ratio;
         }
-        ESP_LOGI(TAG, "  [ear] forward_ratio=%.2f (thr<%.2f)  head_rel=%.1f (thr>%.1f)", ear_forward_ratio, (double)EAR_FORWARD_RATIO_MIN, ear_head_rel, (double)EAR_HEAD_TILT_WARN);
+        ESP_LOGI(TAG, "  [ear] forward_ratio=%.2f (thr<%.2f)  head_rel=%.1f (thr>%.1f)", ear_forward_ratio, (double)posture_ratio_ear_min(), ear_head_rel, (double)posture_tilt_ear_max());
 
-        if (ear_forward_ratio < EAR_FORWARD_RATIO_MIN) return POSTURE_BAD_NECK;     // 条件2
-        if (fabsf(ear_head_rel) > EAR_HEAD_TILT_WARN) return POSTURE_BAD_SHOULDER;  // 条件4
+        if (ear_forward_ratio < posture_ratio_ear_min()) return POSTURE_BAD_NECK;   // 条件2
+        if (fabsf(ear_head_rel) > posture_tilt_ear_max()) return POSTURE_BAD_SHOULDER;  // 条件4
     }
 
     const char* src = (*out_head_source == HEAD_SRC_EYES) ? "眼" : (*out_head_source == HEAD_SRC_EARS) ? "耳" : "无";

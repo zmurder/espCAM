@@ -19,6 +19,7 @@
 #include "nvs.h"
 #include "driver/gpio.h"
 #include "cJSON.h"
+#include "wifi_manager.h"
 #include "lwip/err.h"
 #include "lwip/sys.h"
 #include "lwip/apps/netbiosns.h"
@@ -94,8 +95,8 @@ static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base, int3
         ESP_LOGI(
             TAG, "Station %02x:%02x:%02x:%02x:%02x:%02x left, AID=%d, reason:%d", event->mac[0], event->mac[1], event->mac[2], event->mac[3], event->mac[4], event->mac[5], event->aid, event->reason);
     }
-    else if (event_base == IP_EVENT && event_id == IP_EVENT_AP_STAIPASSIGNED) {
-        ip_event_ap_staipassigned_t* event = (ip_event_ap_staipassigned_t*)event_data;
+    else if (event_base == IP_EVENT && event_id == IP_EVENT_ASSIGNED_IP_TO_CLIENT) {
+        ip_event_assigned_ip_to_client_t* event = (ip_event_assigned_ip_to_client_t*)event_data;
         ESP_LOGI(TAG, "Station assigned IP: " IPSTR, IP2STR(&event->ip));
     }
     // 移除STA事件处理，防止在配置模式下自动重连到之前的WiFi网络
@@ -105,9 +106,9 @@ static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base, int3
 static esp_err_t wifi_connect_to_ap_test(const char* ssid, const char* password)
 {
     wifi_config_t wifi_config = {0};
-    strncpy((char*)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid) - 1);
+    strlcpy((char*)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid));
     if (password && strlen(password) > 0) {
-        strncpy((char*)wifi_config.sta.password, password, sizeof(wifi_config.sta.password) - 1);
+        strlcpy((char*)wifi_config.sta.password, password, sizeof(wifi_config.sta.password));
     }
 
     // 先断开当前连接（如果有）
@@ -183,9 +184,9 @@ static esp_err_t test_wifi_handler(httpd_req_t* req)
         return ESP_OK;
     }
 
-    strncpy(creds.ssid, ssid_json->valuestring, sizeof(creds.ssid) - 1);
+    strlcpy(creds.ssid, ssid_json->valuestring, sizeof(creds.ssid));
     if (pass_json && cJSON_IsString(pass_json)) {
-        strncpy(creds.password, pass_json->valuestring, sizeof(creds.password) - 1);
+        strlcpy(creds.password, pass_json->valuestring, sizeof(creds.password));
     }
     else {
         creds.password[0] = '\0';  // 空密码
@@ -451,9 +452,9 @@ static esp_err_t save_wifi_handler(httpd_req_t* req)
         return ESP_FAIL;
     }
 
-    strncpy(creds.ssid, ssid_json->valuestring, sizeof(creds.ssid) - 1);
+    strlcpy(creds.ssid, ssid_json->valuestring, sizeof(creds.ssid));
     if (pass_json && cJSON_IsString(pass_json)) {
-        strncpy(creds.password, pass_json->valuestring, sizeof(creds.password) - 1);
+        strlcpy(creds.password, pass_json->valuestring, sizeof(creds.password));
     }
     else {
         creds.password[0] = '\0';  // 空密码
@@ -841,7 +842,7 @@ static void start_provisioning_mode(void)
     wifi_ap_config.ap.channel = PROV_AP_CHANNEL;
     wifi_ap_config.ap.max_connection = 4;
     wifi_ap_config.ap.authmode = WIFI_AUTH_OPEN;
-    strncpy((char*)wifi_ap_config.ap.ssid, ap_ssid, sizeof(wifi_ap_config.ap.ssid) - 1);
+    strlcpy((char*)wifi_ap_config.ap.ssid, ap_ssid, sizeof(wifi_ap_config.ap.ssid));
     wifi_ap_config.ap.password[0] = '\0';  // 无密码
 
     ESP_LOGI(TAG, "Starting AP with SSID: %s (open network)", ap_ssid);
@@ -850,7 +851,7 @@ static void start_provisioning_mode(void)
     // 注册事件处理器（只注册AP相关事件），保存实例用于后续注销
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_AP_STACONNECTED, &wifi_prov_event_handler, NULL, &s_wifi_ap_conn_inst));
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_AP_STADISCONNECTED, &wifi_prov_event_handler, NULL, &s_wifi_ap_disc_inst));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_AP_STAIPASSIGNED, &wifi_prov_event_handler, NULL, &s_ip_event_handler_inst));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_ASSIGNED_IP_TO_CLIENT, &wifi_prov_event_handler, NULL, &s_ip_event_handler_inst));
 
     // 获取AP的IP信息（如果 netif 可用）
     if (s_ap_netif) {
@@ -910,7 +911,7 @@ static void stop_provisioning_mode(void)
         s_wifi_ap_disc_inst = NULL;
     }
     if (s_ip_event_handler_inst) {
-        esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_AP_STAIPASSIGNED, s_ip_event_handler_inst);
+        esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_ASSIGNED_IP_TO_CLIENT, s_ip_event_handler_inst);
         s_ip_event_handler_inst = NULL;
     }
 
@@ -1070,9 +1071,9 @@ esp_err_t wifi_config_load_credentials(wifi_credentials_t* creds)
 static esp_err_t wifi_connect_to_ap(const char* ssid, const char* password)
 {
     wifi_config_t wifi_config = {0};
-    strncpy((char*)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid) - 1);
+    strlcpy((char*)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid));
     if (password && strlen(password) > 0) {
-        strncpy((char*)wifi_config.sta.password, password, sizeof(wifi_config.sta.password) - 1);
+        strlcpy((char*)wifi_config.sta.password, password, sizeof(wifi_config.sta.password));
     }
 
     // 检查是否已经在连接中
@@ -1083,7 +1084,11 @@ static esp_err_t wifi_connect_to_ap(const char* ssid, const char* password)
         return ESP_OK;
     }
 
-    // 先断开连接，确保 WiFi 状态干净
+    // 先断开连接，确保 WiFi 状态干净。
+    // 关键：先抑制事件 handler 的断线自动重连——否则这里的 esp_wifi_disconnect() 会触发
+    // "Retrying" 再次发起连接，IDF 6.x 驱动在"连接中"状态拒绝 scan/set_config
+    //（ESP_ERR_WIFI_STATE）→ 本流程误判连接失败 → 误入配网模式并清空 NVS 凭据
+    wifi_manager_set_sta_autoretry(false);
     ESP_LOGI(TAG, "Disconnecting WiFi to ensure clean state");
     esp_wifi_disconnect();
     vTaskDelay(pdMS_TO_TICKS(500));  // 等待断开完成
@@ -1104,11 +1109,13 @@ static esp_err_t wifi_connect_to_ap(const char* ssid, const char* password)
     esp_err_t config_err = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
     if (config_err != ESP_OK) {
         ESP_LOGE(TAG, "esp_wifi_set_config failed: %s", esp_err_to_name(config_err));
+        wifi_manager_set_sta_autoretry(true);
         return config_err;
     }
 
-    // 尝试连接
+    // 尝试连接（连接已发起即恢复自动重连：后续断线重试/CONNECTED_BIT 依赖该机制）
     esp_err_t conn_err = esp_wifi_connect();
+    wifi_manager_set_sta_autoretry(true);
     if (conn_err != ESP_OK && conn_err != ESP_ERR_WIFI_STATE) {
         ESP_LOGW(TAG, "esp_wifi_connect failed: %s", esp_err_to_name(conn_err));
         return conn_err;

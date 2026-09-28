@@ -14,6 +14,7 @@ dependencies:
   #   # `public` flag doesn't have an effect dependencies of the `main` component.
   #   # All dependencies of `main` are public by default.
   #   public: true
-  espressif/esp32-camera: '*'
+  espressif/esp32-camera: '^2.1.6'  # 2.1.4 不兼容 IDF v6.1（sccb-ng.c 缺 esp_private/i2c_platform.h）；2.1.5 起 Fix support for ESP-IDF 6
   espressif/mdns: ^1.9.1
   espressif/esp-dl: '*'
+  espressif/cjson: '^1.7.19'  # IDF v6 移除了内置 json(cJSON) 组件，wifi_config_manager.c 改用官方独立组件

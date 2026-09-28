@@ -37,6 +37,7 @@ static const char* TAG_AP = "WiFi SoftAP";
 static const char* TAG_STA = "WiFi Sta";
 
 static int s_retry_num = 0;
+static bool s_sta_autoretry = true;  // STA 断线自动重连开关（手动连接流程期间临时抑制，防竞态）
 
 /* FreeRTOS event group to signal when we are connected/disconnected */
 static EventGroupHandle_t s_wifi_event_group = NULL;
@@ -60,6 +61,12 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
         wifi_event_sta_disconnected_t* event = (wifi_event_sta_disconnected_t*)event_data;
         // reason code: 1=unspecified, 2=auth_expire, 3=too_many_assoc, 4=sta_leaving, 5=disconnect_by_ap, 6=sta_disconnect_by_ap, 15=4way_handshake_timeout, etc.
         ESP_LOGW(TAG_STA, "Station disconnected, reason:%d (1=unspec, 2=auth_expire, 4=sta_leaving, 5=disconnect_by_ap, 6=ap_disconnect, 15=4way_timeout, 16=recv_disassoc, 17=recv_auth)", event->reason);
+        if (!s_sta_autoretry) {
+            // 手动连接流程（先断开→扫描→设配置→连接）进行中：此断开是流程自己发起的，
+            // 自动重连会和流程竞争 WiFi 状态（IDF 6.x 连接中拒绝 scan/set_config）
+            ESP_LOGI(TAG_STA, "Auto-retry suppressed (manual connect flow in progress)");
+            return;
+        }
         if (s_retry_num < WIFI_MAXIMUM_RETRY) {
             esp_wifi_connect();
             s_retry_num++;
@@ -100,6 +107,15 @@ esp_err_t wifi_manager_init(void)
     return ESP_OK;
 }
 
+void wifi_manager_set_sta_autoretry(bool enable)
+{
+    s_sta_autoretry = enable;
+    if (enable) {
+        s_retry_num = 0;  // 恢复时清零重试计数：新一轮连接给足次数
+    }
+    ESP_LOGI(TAG_STA, "STA auto-retry %s", enable ? "enabled" : "suppressed");
+}
+
 esp_netif_t* wifi_init_softap(void)
 {
     if (s_esp_netif_ap != NULL) {
@@ -129,11 +145,11 @@ esp_netif_t* wifi_init_softap(void)
     wifi_ap_config.ap.authmode = WIFI_AUTH_WPA2_PSK;
 
     // 复制SSID到配置结构体
-    strncpy((char*)wifi_ap_config.ap.ssid, ap_ssid, sizeof(wifi_ap_config.ap.ssid) - 1);
+    strlcpy((char*)wifi_ap_config.ap.ssid, ap_ssid, sizeof(wifi_ap_config.ap.ssid));
 
     // 复制密码到配置结构体
     if (strlen(WIFI_AP_PASSWD) > 0) {
-        strncpy((char*)wifi_ap_config.ap.password, WIFI_AP_PASSWD, sizeof(wifi_ap_config.ap.password) - 1);
+        strlcpy((char*)wifi_ap_config.ap.password, WIFI_AP_PASSWD, sizeof(wifi_ap_config.ap.password));
     }
     else {
         wifi_ap_config.ap.authmode = WIFI_AUTH_OPEN;

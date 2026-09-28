@@ -72,8 +72,11 @@ void process_image(int width, int height, pixformat_t format, uint8_t* buf, size
 
 esp_err_t camera_init()
 {
-    // power up the camera if PWDN pin is defined
-    if (CAM_PIN_PWDN != -1) {
+// power up the camera if PWDN pin is defined
+//（ESP32-S3-EYE 板 PWDN 未接线 = -1/GPIO_NUM_NC；用预处理守卫而非运行时 if，
+//  否则 1ULL << -1 的移位表达式仍会被编译，GCC15 -Werror 直接报错）
+#if CAM_PIN_PWDN >= 0
+    {
         gpio_config_t conf;
         conf.intr_type = GPIO_INTR_DISABLE;
         conf.mode = GPIO_MODE_OUTPUT;
@@ -84,6 +87,7 @@ esp_err_t camera_init()
         gpio_set_level(CAM_PIN_PWDN, 0);
         vTaskDelay(5 / portTICK_PERIOD_MS);  // 延迟等待电源稳定
     }
+#endif
 
     // initialize the camera
     esp_err_t err = esp_camera_init(&camera_config);

@@ -30,6 +30,10 @@ static const char* TAG = "AUDIO_PLAYER";
 static i2s_chan_handle_t tx_chan = NULL;
 static bool i2s_initialized = false;
 
+// 挂起状态（OTA 静音）：volatile 单写（OTA 任务）多读（播放/事件任务）无锁安全
+static volatile bool s_audio_suspended = false;
+static volatile bool s_playing = false;  // 播放中（suspend 等它退出，避免边写边关通道）
+
 // 音频数据数组 - 定义在 res/wifi_connect_audio.c, res/wifi_beak_audio.c, res/wifi_reset_audio.c
 extern const uint8_t wifi_connect_audio[];
 extern const uint8_t wifi_beak_audio[];
@@ -120,6 +124,57 @@ esp_err_t audio_player_deinit(void)
     return ESP_OK;
 }
 
+esp_err_t audio_player_suspend(void)
+{
+    if (!i2s_initialized) {
+        return ESP_OK;  // 未初始化：本来就没声音
+    }
+    if (s_audio_suspended) {
+        return ESP_OK;
+    }
+
+    // 先置位：正在播放的循环写下一块前就退出，新的播放请求被直接拒绝
+    s_audio_suspended = true;
+
+    // 等播放任务退出（单块 2KB @16kHz ≈ 128ms，正常很快；最多等 500ms，不拖慢 OTA）
+    for (int i = 0; i < 50 && s_playing; i++) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    if (s_playing) {
+        ESP_LOGW(TAG, "播放任务未在 500ms 内退出，仍继续关闭 I2S");
+    }
+
+    // 写静音清掉 DMA 残余（有限超时：此时可能已开始下载，不能无限等）
+    static const uint16_t silence[512] = {0};  // 1KB 全 0 = 16bit 静音
+    size_t written = 0;
+    i2s_channel_write(tx_chan, silence, sizeof(silence), &written, pdMS_TO_TICKS(200));
+
+    // 关通道：BCLK/WS 停止 → MAX98357 停止转换，下载期间喇叭彻底安静
+    esp_err_t ret = i2s_channel_disable(tx_chan);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "I2S 通道关闭失败: %s（仍拒绝新播放）", esp_err_to_name(ret));
+        return ret;
+    }
+    ESP_LOGI(TAG, "音频已挂起：I2S 已关闭（OTA 期间静音）");
+    return ESP_OK;
+}
+
+esp_err_t audio_player_resume(void)
+{
+    if (!i2s_initialized || !s_audio_suspended) {
+        return ESP_OK;
+    }
+
+    esp_err_t ret = i2s_channel_enable(tx_chan);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "I2S 通道重新使能失败: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    s_audio_suspended = false;
+    ESP_LOGI(TAG, "音频已恢复");
+    return ESP_OK;
+}
+
 esp_err_t audio_player_play(uint8_t* audio_data, size_t data_size)
 {
     if (audio_data == NULL || data_size == 0) {
@@ -132,10 +187,18 @@ esp_err_t audio_player_play(uint8_t* audio_data, size_t data_size)
         return ESP_ERR_INVALID_STATE;
     }
 
+    if (s_audio_suspended) {
+        ESP_LOGW(TAG, "音频已挂起（OTA 静音中），忽略播放请求");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    s_playing = true;
+
     // 将 8-bit PCM 转换为 16-bit PCM
     uint16_t* buffer = malloc(data_size * 2);
     if (buffer == NULL) {
         ESP_LOGE(TAG, "Failed to allocate audio buffer");
+        s_playing = false;
         return ESP_ERR_NO_MEM;
     }
 
@@ -148,13 +211,13 @@ esp_err_t audio_player_play(uint8_t* audio_data, size_t data_size)
     // 播放转换后的数据
     size_t bytes_written;
     esp_err_t ret = i2s_channel_write(tx_chan, buffer, data_size * 2, &bytes_written, portMAX_DELAY);
+    free(buffer);
+    s_playing = false;
     if (ret != ESP_OK) {
-        free(buffer);
         ESP_LOGE(TAG, "Failed to write audio data: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    free(buffer);
     return ESP_OK;
 }
 
@@ -163,6 +226,10 @@ esp_err_t audio_player_stop()
     if (!i2s_initialized) {
         ESP_LOGW(TAG, "Audio player not initialized");
         return ESP_OK;
+    }
+
+    if (s_audio_suspended) {
+        return ESP_OK;  // 挂起中：suspend 已清空 DMA 且通道已关，不能再写
     }
 
     // // 计算音频播放时间（毫秒）
@@ -196,6 +263,14 @@ esp_err_t audio_player_play_stream(uint8_t* audio_data, size_t data_size)
         return ESP_ERR_INVALID_STATE;
     }
 
+    if (s_audio_suspended) {
+        ESP_LOGW(TAG, "音频已挂起（OTA 静音中），忽略播放请求");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    s_playing = true;
+    esp_err_t ret = ESP_OK;
+
     // 将音频数据流式发送到I2S接口
     // 使用更大的块大小以提高性能
     size_t bytes_written;
@@ -203,13 +278,22 @@ esp_err_t audio_player_play_stream(uint8_t* audio_data, size_t data_size)
     const size_t chunk_size = 2048;  // 使用2KB的块大小
 
     while (offset < data_size) {
+        // 挂起（OTA 开始）：立刻退出不再喂数据。否则 OTA 的 flash 擦写会把块间隔
+        // 拉长到几百 ms、DMA 反复饿死，每次接缝都是一个阶跃 → 喇叭全程"哒哒"响
+        if (s_audio_suspended) {
+            ESP_LOGW(TAG, "播放中止（音频已挂起），已写 %u/%u 字节", (unsigned)offset, (unsigned)data_size);
+            ret = ESP_ERR_INVALID_STATE;
+            break;
+        }
+
         size_t current_chunk = (data_size - offset > chunk_size) ? chunk_size : (data_size - offset);
 
         // 将 8-bit PCM 转换为 16-bit PCM
         uint16_t* buffer = malloc(current_chunk * 2);
         if (buffer == NULL) {
             ESP_LOGE(TAG, "Failed to allocate audio buffer");
-            return ESP_ERR_NO_MEM;
+            ret = ESP_ERR_NO_MEM;
+            break;
         }
 
         for (size_t i = 0; i < current_chunk; i++) {
@@ -219,21 +303,23 @@ esp_err_t audio_player_play_stream(uint8_t* audio_data, size_t data_size)
         }
 
         // 播放扩展后的数据
-        esp_err_t ret = i2s_channel_write(tx_chan, buffer, current_chunk * 2, &bytes_written, portMAX_DELAY);
-        if (ret != ESP_OK) {
-            free(buffer);
-            ESP_LOGE(TAG, "Failed to write audio data: %s", esp_err_to_name(ret));
-            return ret;
+        esp_err_t wret = i2s_channel_write(tx_chan, buffer, current_chunk * 2, &bytes_written, portMAX_DELAY);
+        free(buffer);
+        if (wret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to write audio data: %s", esp_err_to_name(wret));
+            ret = wret;
+            break;
         }
 
         offset += current_chunk;
-        free(buffer);
     }
 
-    // 播放完成后停止并发送静音
-    audio_player_stop();
-
-    return ESP_OK;
+    if (ret == ESP_OK) {
+        // 播放完成后停止并发送静音（挂起中止时不写：suspend 已清 DMA 且通道已关）
+        audio_player_stop();
+    }
+    s_playing = false;
+    return ret;
 }
 
 esp_err_t audio_player_play_wifi_status(int status)

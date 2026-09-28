@@ -92,10 +92,19 @@ def _img_cfg_for(devid):
 _load_img_cfg()
 
 # 与 ESP judge_posture 一致的阈值（4 条任意成立即不良；左上角显示参考用）
-EYE_FORWARD_RATIO_MIN = 1.5  # 条件1：眼肩垂直距离/双眼距离 < 此值 → 前倾（需据正常坐姿标定）
-EAR_FORWARD_RATIO_MIN = 1.5  # 条件2：耳肩垂直距离/双耳距离 < 此值 → 前倾
-EYE_HEAD_TILT_WARN = 35.0  # 条件3：双眼-双肩相对倾斜角 > 此值 → 歪头
-EAR_HEAD_TILT_WARN = 35.0  # 条件4：双耳-双肩相对倾斜角 > 此值 → 歪头
+# 眼/耳前倾比阈值在 ESP 端运行时可配（ratio 命令/网页设置，ACK 上报实际值）——
+# 这两个常量仅作旧固件未上报时的回退默认值；其余阈值两端一致为编译期常量
+EYE_FORWARD_RATIO_MIN = 1.2  # 条件1：眼肩垂直距离/双眼距离 < 此值 → 前倾（正常坐姿实测约 1.5，留余量）
+EAR_FORWARD_RATIO_MIN = 0.7  # 条件2：耳肩垂直距离/双耳距离 < 此值 → 前倾（耳离肩更近+双耳距更宽，比值天然远小于眼）
+EYE_HEAD_TILT_WARN = 20.0  # 条件3：双眼-双肩相对倾斜角 > 此值 → 歪头
+EAR_HEAD_TILT_WARN = 15.0  # 条件4：双耳-双肩相对倾斜角 > 此值 → 歪头（耳关键点噪声更大、正常角更小，故更严）
+
+# 检测阈值设置（ratio 命令 / Web"检测阈值"卡）：合法范围与默认值（须与 ESP posture_sched.c 一致）。
+# **必须定义在 _sched_mem = _load_sched_mem() 之前**：后者在模块加载时立即执行，
+# 其中 _norm_pair 用 _THR_DEFAULT 迁移旧记忆文件的二元组（曾因定义在文件后段导致 NameError 起不来）
+_RATIO_MIN, _RATIO_MAX = 0.2, 10.0      # 前倾比阈值合法范围（与 ESP posture_ratio_set 一致）
+_TILT_MIN, _TILT_MAX = 10.0, 80.0      # 歪头倾角阈值合法范围（度，与 ESP posture_tilt_set 一致）
+_THR_DEFAULT = [1.2, 0.7, 20.0, 15.0]  # [眼比, 耳比, 眼倾角, 耳倾角]
 # 几何合理性预检（与 ESP 一致）：同组连线近垂直属明显误检；双肩超阈或眼+耳全超阈 → 本帧不判断
 SHOULDER_LINE_TILT_MAX = 40.0  # 双肩连线 |倾斜角| 上限（度）
 EYE_LINE_TILT_MAX = 40.0  # 双眼连线 |倾斜角| 上限（度）
@@ -130,13 +139,29 @@ def _load_sched_mem():
     def _norm(x):  # JSON 读回的 [[s,e],...] → [(s,e),...]（与内存新建一致）
         return [tuple(p) for p in x] if isinstance(x, list) else x
 
+    def _norm_pair(x):  # 检测阈值 [眼比,耳比,眼倾角,耳倾角]；旧 2 元组补默认倾角；坏数据回退默认
+        try:
+            v = [float(i) for i in x]
+        except (TypeError, ValueError, IndexError):
+            return list(_THR_DEFAULT)
+        if len(v) == 2:
+            return v + _THR_DEFAULT[2:]
+        return (v + _THR_DEFAULT)[:4]
+
+    def _norm_alert(x):  # 提醒模式：旧记忆文件存布尔（True=连续播）→ 0|1|2 三态
+        if isinstance(x, bool):
+            return 1 if x else 0
+        return x if x in (0, 1, 2) else 1
+
     try:
         with open(SCHED_MEM_FILE, encoding="utf-8") as f:
             m = json.load(f)
         if isinstance(m, dict) and isinstance(m.get("devices"), dict):
             return {"default": _norm(m.get("default")), "devices": {k: _norm(v) for k, v in m["devices"].items()},
-                    "alert_default": m.get("alert_default", True),       # 不良提醒模式默认（True=连续播）
-                    "alert_devices": {k: bool(v) for k, v in m.get("alert_devices", {}).items()}}  # 各设备专属
+                    "alert_default": _norm_alert(m.get("alert_default", 1)),       # 提醒模式默认（1=连续播）
+                    "alert_devices": {k: _norm_alert(v) for k, v in m.get("alert_devices", {}).items()},  # 各设备专属
+                    "ratio_default": _norm_pair(m.get("ratio_default", [1.2, 0.7])),  # 前倾比阈值默认 [眼, 耳]
+                    "ratio_devices": {k: _norm_pair(v) for k, v in m.get("ratio_devices", {}).items()}}  # 各设备专属
     except (OSError, ValueError):
         pass
     # 无记忆文件：POSTURE_SCHED_SLOTS 常量作 default（解析成分钟元组，旧语义不变）
@@ -145,7 +170,8 @@ def _load_sched_mem():
     except ValueError as e:
         print(f"[sched] POSTURE_SCHED_SLOTS 配置错误: {e}")
         dflt = None
-    return {"default": dflt, "devices": {}, "alert_default": True, "alert_devices": {}}
+    return {"default": dflt, "devices": {}, "alert_default": 1, "alert_devices": {},
+            "ratio_default": list(_THR_DEFAULT), "ratio_devices": {}}
 
 
 # 坐姿历史库（SQLite）：result_receiver 逐帧写入 ts/result/ratio，
@@ -220,6 +246,7 @@ def _slots_to_set_msg(slots):
 _sched_mem = _load_sched_mem()  # 放在 _parse_slots_arg 之后（无记忆文件时用它解析常量）
 _sched_synced = set()  # 本轮进程内已补发专属时段的设备（重启 PC 才会再补发）
 _alert_synced = set()  # 本轮进程内已补发专属提醒模式的设备（同上）
+_ratio_synced = set()  # 本轮进程内已补发专属前倾比阈值的设备（同上）
 
 
 _disc_sock = None  # discovery socket（broadcaster 创建后共享给主线程命令下发）
@@ -291,8 +318,18 @@ def _start_ota_server():
 
 
 def _fw_version():
-    """读 main/app_version.h 的 APP_VERSION（build 产物对应的源码版本，升级提示显示用；
-    注意：若改了 .h 未重新 build，此值会超前于 ota/ 实际固件——升级判断仍以 sha 为准）"""
+    """目标固件版本（升级提示显示用）：优先从 ota/espCAM_WIFI.bin 镜像解析
+    （esp_app_desc.version 在偏移 0x20+0x10，32 字节 C 串）——树莓派等只部署 .py 的
+    机器上没有 main/app_version.h，且镜像里的才是实际会推送的版本；失败再退回头文件。
+    注意：升级判断始终以镜像 sha 为准，此值仅显示用"""
+    try:
+        with open(OTA_BIN, "rb") as f:
+            f.seek(0x20 + 0x10)
+            ver = f.read(32).split(b"\x00")[0].decode("ascii", errors="replace").strip()
+        if ver:
+            return ver
+    except OSError:
+        pass
     try:
         with open(os.path.join("main", "app_version.h"), encoding="utf-8") as f:
             m = re.search(r'#define\s+APP_VERSION\s+"([^"]+)"', f.read())
@@ -335,6 +372,12 @@ def _ota_advance():
             b["phase"] = None
             b["progress"] = None
         else:
+            # push 阶段每 10s 重发一次 OTA_START：弱信号网络下单播可能丢包（丢了要白等 300s 超时）。
+            # 重复包安全——ESP 已在下载时回 busy 拒绝（防双任务的置位在建任务之前），收到
+            # OTA_STARTED 后 phase 转 download 即自动停止重发
+            if b["phase"] == "push" and time.time() - b.get("last_push", 0.0) > 10:
+                b["last_push"] = time.time()
+                _trigger_one(b["current"], "重发")
             return
     if not b["queue"]:
         return
@@ -347,6 +390,7 @@ def _ota_advance():
     b["deadline"] = time.time() + OTA_STEP_TIMEOUT
     b["phase"] = "push"
     b["progress"] = None
+    b["last_push"] = time.time()
     if not _trigger_one(devid):
         b["current"] = None
         b["phase"] = None
@@ -361,10 +405,13 @@ def _devid_by_ip(ip):
 
 
 def _ota_load():
-    """把 build/espCAM_WIFI.bin 拷入 ota/（内容相同则跳过）；返回是否就绪"""
+    """把 build/espCAM_WIFI.bin 拷入 ota/（内容相同则跳过）；返回是否就绪。
+    本机无编译产物（树莓派等分发机）但 ota/ 已有固件时直接使用它——网页"升级"按钮在 Pi 上同样可用"""
     src_sha = _bin_sha8(OTA_SRC)
     if not src_sha:
-        print(f"[ota] 未找到固件产物 {OTA_SRC}（先 idf.py build）")
+        if _bin_sha8(OTA_BIN):
+            return True  # 树莓派场景：固件已手动放入 ota/，跳过拷贝直接用
+        print(f"[ota] 未找到固件产物 {OTA_SRC}（先 idf.py build，或把固件放入 {OTA_DIR}/）")
         return False
     if src_sha == _bin_sha8(OTA_BIN):
         return True  # ota/ 已是最新
@@ -488,6 +535,15 @@ def _send_sched_set(slots, devid=None):
             _disc_sock.sendto(msg, t)
         except OSError:
             pass
+    # 广播在弱信号网络上有丢包前科（SCHED_SET 或回执丢一条即"这台没设上"，需手动再点）：
+    # SCHED_SET 幂等（重复写同一时段无副作用，回执按文本去重），全部设备时逐台单播兜底
+    if devid is None:
+        for d in list(_devices.values()):
+            if d.get("ip"):
+                try:
+                    _disc_sock.sendto(msg, (d["ip"], DISCOVERY_PORT))
+                except OSError:
+                    pass
     desc = ", ".join(f"{s // 60:02d}:{s % 60:02d}-{e // 60:02d}:{e % 60:02d}" for s, e in slots)
     who = "全部设备" if devid is None else devid
     print(f"[sched] 已下发设置({who}): {desc or '全天检测(清空)'}，等待 ESP 确认...")
@@ -514,15 +570,16 @@ def _sched_set_memory(devid, slots):
     _save_sched_mem()
 
 
-_ALERT_DESC = {True: "连续播", False: "只播一次"}
+_ALERT_DESC = {1: "连续播", 0: "只播一次", 2: "关闭"}
 
 
 def _send_alert_set(val, devid=None):
-    """下发 ESPCAM_ALERT_SET（devid=None 广播全部；否则单播该设备），ESP 写 NVS 后回 ALERT_STATE 确认"""
+    """下发 ESPCAM_ALERT_SET（devid=None 广播全部；否则单播该设备），ESP 写 NVS 后回 ALERT_STATE 确认。
+    val: 0=只播一次 / 1=连续播 / 2=关闭语音（检测照常）"""
     if _disc_sock is None:
         print("[alert] 发现通道未就绪，稍后再试")
         return
-    msg = f"ESPCAM_ALERT_SET {1 if val else 0}".encode()
+    msg = f"ESPCAM_ALERT_SET {int(val)}".encode()
     targets = _broadcast_targets() if devid is None else None
     if devid is not None:
         d = _devices.get(devid)
@@ -535,6 +592,14 @@ def _send_alert_set(val, devid=None):
             _disc_sock.sendto(msg, t)
         except OSError:
             pass
+    # 同 ratio/sched：ALERT_SET 幂等，全部设备时逐台单播兜底防广播丢包
+    if devid is None:
+        for d in list(_devices.values()):
+            if d.get("ip"):
+                try:
+                    _disc_sock.sendto(msg, (d["ip"], DISCOVERY_PORT))
+                except OSError:
+                    pass
     who = "全部设备" if devid is None else devid
     print(f"[alert] 已下发({_ALERT_DESC[val]})({who})，等待 ESP 确认...")
 
@@ -552,11 +617,11 @@ def _alert_set_memory(devid, val):
 
 
 def _alert_cmd(arg=""):
-    """不良提醒模式命令（键盘与 Web 共用）：'' = 概览；repeat=连续播 / once=只播一次；
-    @<序号|ID> repeat|once = 只改该设备。设置写 ESP NVS（断电保持）并记入 sched_per_dev.json"""
-    usage = "[alert] 用法: alert（查看） | alert repeat|once（全部设备） | alert @<序号|ID> repeat|once（指定设备）"
+    """不良提醒模式命令（键盘与 Web 共用）：'' = 概览；repeat=连续播 / once=只播一次 / off=关闭语音；
+    @<序号|ID> repeat|once|off = 只改该设备。设置写 ESP NVS（断电保持）并记入 sched_per_dev.json"""
+    usage = "[alert] 用法: alert（查看） | alert repeat|once|off（全部设备） | alert @<序号|ID> repeat|once|off（指定设备）"
     if not arg:
-        print(f"[alert] 默认(全部设备): {_ALERT_DESC[_sched_mem['alert_default']]}（repeat=连续播, once=只播一次）")
+        print(f"[alert] 默认(全部设备): {_ALERT_DESC[_sched_mem['alert_default']]}（repeat=连续播, once=只播一次, off=关闭语音仅检测照常）")
         for k, v in _sched_mem["alert_devices"].items():
             print(f"[alert]   {k}（专属）: {_ALERT_DESC[v]}")
         for k, d in _devices.items():
@@ -570,12 +635,109 @@ def _alert_cmd(arg=""):
         if not devid:
             return
         arg = rest.strip()
-    if arg not in ("repeat", "once"):
+    if arg not in ("repeat", "once", "off"):
         print(usage)
         return
-    val = arg == "repeat"
+    val = {"repeat": 1, "once": 0, "off": 2}[arg]
     _alert_set_memory(devid, val)
     _send_alert_set(val, devid)
+
+
+def _parse_ratio_arg(arg):
+    """'1.5 1.2' → (眼,耳)两元组；'1.5 1.2 35 30' → (眼,耳,眼倾角,耳倾角)四元组。
+    前倾比 0.2~10，倾角 10~80 度；失败抛 ValueError（本地预校验）"""
+    parts = arg.split()
+    if len(parts) not in (2, 4):
+        raise ValueError(f"需要 2 个数（眼 耳）或 4 个数（眼 耳 眼倾角 耳倾角），当前 {len(parts)} 个")
+    try:
+        vals = [float(p) for p in parts]
+    except ValueError:
+        raise ValueError(f"数值无法解析: '{arg.strip()}'")
+    checks = [("眼", vals[0], _RATIO_MIN, _RATIO_MAX), ("耳", vals[1], _RATIO_MIN, _RATIO_MAX)]
+    if len(vals) == 4:
+        checks += [("眼倾角", vals[2], _TILT_MIN, _TILT_MAX), ("耳倾角", vals[3], _TILT_MIN, _TILT_MAX)]
+    for name, v, lo, hi in checks:
+        if not (lo <= v <= hi):
+            raise ValueError(f"{name}阈值 {v} 超出范围 {lo}~{hi}")
+    return tuple(vals)
+
+
+def _send_ratio_set(vals, devid=None):
+    """下发 ESPCAM_RATIO_SET（devid=None 广播全部；否则单播该设备），ESP 写 NVS 后回 RATIO_STATE 确认。
+    vals: (眼,耳) 或 (眼,耳,眼倾角,耳倾角)"""
+    if _disc_sock is None:
+        print("[ratio] 发现通道未就绪，稍后再试")
+        return
+    msg = (f"ESPCAM_RATIO_SET {vals[0]:.2f} {vals[1]:.2f}" if len(vals) == 2
+           else f"ESPCAM_RATIO_SET {vals[0]:.2f} {vals[1]:.2f} {vals[2]:.0f} {vals[3]:.0f}").encode()
+    targets = _broadcast_targets() if devid is None else None
+    if devid is not None:
+        d = _devices.get(devid)
+        if not d or not d.get("ip"):
+            print(f"[ratio] 设备 {devid} 不在线，无法单播（先 ota list 查看）")
+            return
+        targets = [(d["ip"], DISCOVERY_PORT)]
+    for t in targets:
+        try:
+            _disc_sock.sendto(msg, t)
+        except OSError:
+            pass
+    # 广播在这套弱信号网络上有丢包前科（RATIO_SET 或回执丢一个即全静默）：RATIO_SET 幂等
+    #（重复写同一值无副作用，回执重复按值去重），全部设备时再逐台单播兜底。
+    # 注意 OTA_START 绝不能这样干（重复包会创建两个下载任务写坏镜像）
+    if devid is None:
+        for d in list(_devices.values()):
+            if d.get("ip"):
+                try:
+                    _disc_sock.sendto(msg, (d["ip"], DISCOVERY_PORT))
+                except OSError:
+                    pass
+    who = "全部设备" if devid is None else devid
+    desc = f"眼<{vals[0]:.2f} 耳<{vals[1]:.2f}" + (f" 倾角{vals[2]:.0f}°/{vals[3]:.0f}°" if len(vals) == 4 else "")
+    print(f"[ratio] 已下发({desc})({who})，等待 ESP 确认...")
+
+
+def _ratio_set_memory(devid, vals):
+    """前倾比阈值记忆（与时段/提醒同一份 sched_per_dev.json）：全部=统一默认并清专属；单台=只写自己"""
+    if devid is None:
+        _sched_mem["ratio_default"] = list(vals)
+        _sched_mem["ratio_devices"].clear()
+        _ratio_synced.clear()
+    else:
+        _sched_mem["ratio_devices"][devid] = list(vals)
+        _ratio_synced.discard(devid)  # 让 ACK 补发路径重新同步一次
+    _save_sched_mem()
+
+
+def _ratio_cmd(arg=""):
+    """检测阈值命令（键盘与 Web 共用）：'' = 概览；<eye> <ear> = 全部设备（仅前倾比）；
+    <eye> <ear> <眼倾角> <耳倾角> = 四阈值一起设；@<序号|ID> 前缀 = 指定设备。
+    设置写 ESP NVS（断电保持，上电读取）并记入 sched_per_dev.json"""
+    usage = "[ratio] 用法: ratio（查看） | ratio <眼> <耳> [眼倾角 耳倾角]（全部设备，如 ratio 1.5 1.2 35 30） | ratio @<序号|ID> ...（指定设备）"
+    if not arg:
+        d0 = _sched_mem["ratio_default"]
+        print(f"[ratio] 默认(全部设备): 眼<{d0[0]:.2f} 耳<{d0[1]:.2f} 倾角{d0[2]:.0f}°/{d0[3]:.0f}°（前倾比 {_RATIO_MIN}~{_RATIO_MAX}，歪头倾角 {_TILT_MIN:.0f}~{_TILT_MAX:.0f} 度）")
+        for k, v in _sched_mem["ratio_devices"].items():
+            print(f"[ratio]   {k}（专属）: 眼<{v[0]:.2f} 耳<{v[1]:.2f} 倾角{v[2]:.0f}°/{v[3]:.0f}°")
+        for k, d in _devices.items():
+            if d.get("ip") and d.get("eye_thr") is not None:
+                tilt = f" 倾角{d['eye_tilt']:.0f}°/{d['ear_tilt']:.0f}°" if d.get("eye_tilt") is not None else ""
+                print(f"[ratio]   {k} 在线生效: 眼<{d['eye_thr']:.2f} 耳<{d['ear_thr']:.2f}{tilt}")
+        return
+    devid = None
+    if arg.startswith("@"):
+        head, _, rest = arg.partition(" ")
+        devid = _resolve_device(head[1:].lower())
+        if not devid:
+            return
+        arg = rest.strip()
+    try:
+        vals = _parse_ratio_arg(arg)
+    except ValueError as e:
+        print(f"[ratio] 设置失败(未下发): {e}")
+        return
+    _ratio_set_memory(devid, vals)
+    _send_ratio_set(vals, devid)
 
 
 _sched_last = {}  # devid → {"text","t"}：上次 [sched] 打印（内容+时刻）：相同内容 60s 一条心跳，不每 2s 刷屏
@@ -636,10 +798,16 @@ def discovery_broadcaster():
         if _sched_mem["devices"]:
             print(f"[sched] 另有 {len(_sched_mem['devices'])} 台专属设置，将在其应答后单播覆盖")
     # 启动下发：不良提醒模式默认值（同通道广播一次；有专属记忆的设备 ACK 后单播覆盖）
-    alert_set = f"ESPCAM_ALERT_SET {1 if _sched_mem['alert_default'] else 0}".encode()
+    alert_set = f"ESPCAM_ALERT_SET {_sched_mem['alert_default']}".encode()
     print(f"[alert] 下发默认提醒模式(全部设备): {_ALERT_DESC[_sched_mem['alert_default']]}（将写入 ESP NVS）")
     if _sched_mem["alert_devices"]:
         print(f"[alert] 另有 {len(_sched_mem['alert_devices'])} 台专属设置，将在其应答后单播覆盖")
+    # 启动下发：检测阈值默认值（前倾比 + 歪头倾角，同通道广播一次；有专属记忆的设备 ACK 后单播覆盖）
+    _rd = _sched_mem["ratio_default"]
+    ratio_set = f"ESPCAM_RATIO_SET {_rd[0]:.2f} {_rd[1]:.2f} {_rd[2]:.0f} {_rd[3]:.0f}".encode()
+    print(f"[ratio] 下发默认检测阈值(全部设备): 眼<{_rd[0]:.2f} 耳<{_rd[1]:.2f} 倾角{_rd[2]:.0f}°/{_rd[3]:.0f}°（将写入 ESP NVS）")
+    if _sched_mem["ratio_devices"]:
+        print(f"[ratio] 另有 {len(_sched_mem['ratio_devices'])} 台专属设置，将在其应答后单播覆盖")
     first_round = True
     while True:
         for t in _broadcast_targets():
@@ -648,6 +816,7 @@ def discovery_broadcaster():
                     sock.sendto(sched_set.encode(), t)  # 启动时下发设置（None=不下发）
                 if first_round:
                     sock.sendto(alert_set, t)  # 启动时下发提醒模式默认值
+                    sock.sendto(ratio_set, t)  # 启动时下发前倾比阈值默认值
                 sock.sendto(SCHED_GET, t)  # 每周期查询调度状态
                 sock.sendto(DISCOVERY_REQ, t)  # 保活：IP 变化 2s 内自动跟随
             except OSError:
@@ -689,9 +858,20 @@ def discovery_broadcaster():
                 if ver and ver != d["ver"]:
                     d["ver"] = ver
                     print(f"[version] {devid} 固件版本: {ver}")
-                # 第 5 段 = 不良提醒模式（旧固件无此段 → 保持 None，Web 显示"—"）
-                if len(parts) >= 5 and parts[4] in ("0", "1"):
-                    d["alert"] = parts[4] == "1"
+                # 第 5 段 = 不良提醒模式（0=只播一次，1=连续播，2=关闭语音；旧固件无此段 → None，Web 显示"—"）
+                if len(parts) >= 5 and parts[4] in ("0", "1", "2"):
+                    d["alert"] = int(parts[4])
+                # 第 6/7 段 = 眼/耳前倾比阈值，第 8/9 段 = 眼/耳歪头倾角阈值（旧固件无 → None，Web 显示"—"）
+                if len(parts) >= 7:
+                    try:
+                        d["eye_thr"], d["ear_thr"] = float(parts[5]), float(parts[6])
+                    except ValueError:
+                        pass
+                if len(parts) >= 9:
+                    try:
+                        d["eye_tilt"], d["ear_tilt"] = float(parts[7]), float(parts[8])
+                    except ValueError:
+                        pass
                 # 批次确认：当前台 ACK 上报新 sha = 已重启进新固件，继续下一台
                 b = _ota_batch
                 if b["current"] == devid and b["before_sha"] and sha8 and sha8 != b["before_sha"]:
@@ -709,14 +889,20 @@ def discovery_broadcaster():
                 if devid in _sched_mem["alert_devices"] and devid not in _alert_synced:
                     _alert_synced.add(devid)
                     _send_alert_set(_sched_mem["alert_devices"][devid], devid)
+                # 前倾比阈值专属记忆同理
+                if devid in _sched_mem["ratio_devices"] and devid not in _ratio_synced:
+                    _ratio_synced.add(devid)
+                    _send_ratio_set(_sched_mem["ratio_devices"][devid], devid)
             elif data.startswith(b"ESPCAM_SCHED_STATE"):
                 _handle_sched_state(data, _devid_by_ip(addr[0]))
             elif data.startswith(b"ESPCAM_ALERT_STATE"):
-                # ESPCAM_ALERT_STATE 0|1：ALERT_SET 的回执 / ALERT_GET 的应答（确认实际生效模式）
+                # ESPCAM_ALERT_STATE 0|1|2：ALERT_SET 的回执 / ALERT_GET 的应答（确认实际生效模式）
                 devid = _devid_by_ip(addr[0])
                 try:
-                    val = int(data.split()[1]) == 1
+                    val = int(data.split()[1])
                 except (IndexError, ValueError):
+                    val = None
+                if val not in (0, 1, 2):
                     val = None
                 d = _devices.get(devid)
                 if d is not None and val is not None:
@@ -725,6 +911,29 @@ def discovery_broadcaster():
                     d["alert"] = val
             elif data.startswith(b"ESPCAM_ALERT_ERR"):
                 print(f"[alert] ESP 设置失败: {data.decode(errors='ignore')[17:].strip()}")
+            elif data.startswith(b"ESPCAM_RATIO_STATE"):
+                # ESPCAM_RATIO_STATE <eye> <ear> [eyeTilt earTilt]：RATIO_SET 的回执 / RATIO_GET 的应答
+                devid = _devid_by_ip(addr[0])
+                sp = data.split()
+                vals = tilts = None
+                try:
+                    vals = (float(sp[1]), float(sp[2]))
+                    tilts = (float(sp[3]), float(sp[4])) if len(sp) >= 5 else None
+                except (IndexError, ValueError, TypeError):
+                    print(f"[ratio] {devid} 回包无法解析: {data.decode(errors='ignore')!r}")
+                d = _devices.get(devid)
+                if d is None:
+                    print(f"[ratio] 未知来源回包: {addr[0]}")
+                elif vals is not None:
+                    if (d.get("eye_thr"), d.get("ear_thr")) != vals:
+                        print(f"[ratio] {devid} 前倾阈值已生效: 眼<{vals[0]:.2f} 耳<{vals[1]:.2f}")
+                    d["eye_thr"], d["ear_thr"] = vals
+                    if tilts is not None:
+                        if (d.get("eye_tilt"), d.get("ear_tilt")) != tilts:
+                            print(f"[ratio] {devid} 歪头阈值已生效: 眼>{tilts[0]:.0f}° 耳>{tilts[1]:.0f}°")
+                        d["eye_tilt"], d["ear_tilt"] = tilts
+            elif data.startswith(b"ESPCAM_RATIO_ERR"):
+                print(f"[ratio] ESP 设置失败: {data.decode(errors='ignore')[17:].strip()}")
             elif data.startswith(b"ESPCAM_SCHED_ERR"):
                 print(f"[sched] ESP 设置失败: {data.decode(errors='ignore')[16:].strip()}")
             elif data == b"ESPCAM_OTA_STARTED":
@@ -927,6 +1136,12 @@ def on_image(jpg, devid=""):
 
         eye_ratio = eye_rel = ear_ratio = ear_rel = None
         judge = "NOT_DET"
+        # 前倾比/歪头倾角阈值跟随该设备实际配置（ESP 经 ACK 上报；旧固件未上报回退常量默认值）
+        dd = _devices.get(devid) or {}
+        eye_thr = dd.get("eye_thr") if dd.get("eye_thr") is not None else EYE_FORWARD_RATIO_MIN
+        ear_thr = dd.get("ear_thr") if dd.get("ear_thr") is not None else EAR_FORWARD_RATIO_MIN
+        eyet_thr = dd.get("eye_tilt") if dd.get("eye_tilt") is not None else EYE_HEAD_TILT_WARN
+        eart_thr = dd.get("ear_tilt") if dd.get("ear_tilt") is not None else EAR_HEAD_TILT_WARN
         if shoulders_ok and (eyes_ok or ears_ok):
             sh_t = _norm_tilt(math.degrees(math.atan2(rs[1] - ls[1], rs[0] - ls[0])))
             sh_y = (ls[1] + rs[1]) * 0.5
@@ -954,20 +1169,20 @@ def on_image(jpg, devid=""):
                 # 判断（眼优先；任意成立即不良）
                 judge = "OK"
                 if eyes_usable:
-                    if eye_ratio < EYE_FORWARD_RATIO_MIN:
+                    if eye_ratio < eye_thr:
                         judge = "BAD_NECK"
-                    elif abs(eye_rel) > EYE_HEAD_TILT_WARN:
+                    elif abs(eye_rel) > eyet_thr:
                         judge = "BAD_SHOULDER"
                 if judge == "OK" and ears_usable:
-                    if ear_ratio < EAR_FORWARD_RATIO_MIN:
+                    if ear_ratio < ear_thr:
                         judge = "BAD_NECK"
-                    elif abs(ear_rel) > EAR_HEAD_TILT_WARN:
+                    elif abs(ear_rel) > eart_thr:
                         judge = "BAD_SHOULDER"
 
         info = [
             f"result: {RESULT_TAG.get(result, '?')}  (pc: {judge})",
-            f"eye: ratio={_fmt(eye_ratio)} rel={_fmt(eye_rel)}  [thr<{EYE_FORWARD_RATIO_MIN}, >{EYE_HEAD_TILT_WARN:.0f}]",
-            f"ear: ratio={_fmt(ear_ratio)} rel={_fmt(ear_rel)}  [thr<{EAR_FORWARD_RATIO_MIN}, >{EAR_HEAD_TILT_WARN:.0f}]",
+            f"eye: ratio={_fmt(eye_ratio)} rel={_fmt(eye_rel)}  [thr<{eye_thr}, >{eyet_thr:.0f}]",
+            f"ear: ratio={_fmt(ear_ratio)} rel={_fmt(ear_rel)}  [thr<{ear_thr}, >{eart_thr:.0f}]",
             f"conf: [{','.join(f'{k[2]:.2f}' for k in kps)}]",
         ]
         color = "red" if result in (1, 2) else "lime"  # 坐姿不良(BAD_NECK/BAD_SHOULDER)显示红色
@@ -1074,8 +1289,11 @@ def handle_command(cmd):
     if cmd.lower() == "alert" or cmd.lower().startswith("alert "):
         _alert_cmd(cmd[5:].strip().lower())
         return
+    if cmd.lower() == "ratio" or cmd.lower().startswith("ratio "):
+        _ratio_cmd(cmd[5:].strip())
+        return
     if not cmd.lower().startswith("s"):
-        print(f"未知命令: {cmd}（s=设置检测时段，ota=固件升级，img=图像保存设置，alert=不良提醒模式）")
+        print(f"未知命令: {cmd}（s=设置检测时段，ota=固件升级，img=图像保存设置，alert=不良提醒模式，ratio=前倾比阈值）")
         return
     arg = cmd[1:].strip()
     if not arg:
@@ -1240,13 +1458,18 @@ def _web_state():
                 "sched_desc": d.get("sched_desc") if sched_ok else None,  # 检测时段（None=尚未上报）
                 "sched_synced": d.get("sched_synced") if sched_ok else None,  # ESP 时间同步状态
                 "sched_active": d.get("sched_active") if sched_ok else None,
-                "alert": d.get("alert"),  # 不良提醒模式（True=连续播；None=旧固件未上报）
+                "alert": d.get("alert"),  # 不良提醒模式（1=连续播 0=只播一次 2=关闭；None=旧固件未上报）
+                "eye_thr": d.get("eye_thr"),  # 眼前倾比阈值（None=旧固件未上报，显示"—"）
+                "ear_thr": d.get("ear_thr"),  # 耳前倾比阈值（同上）
+                "eye_tilt": d.get("eye_tilt"),  # 眼歪头倾角阈值（度；None=旧固件未上报）
+                "ear_tilt": d.get("ear_tilt"),  # 耳歪头倾角阈值（度；同上）
             }
         )
     return {
         "fw_version": _fw_version(),
         "watch": _ota_state["watch"],
         "alert_default": _sched_mem["alert_default"],  # 不良提醒模式默认（全部设备）
+        "ratio_default": _sched_mem["ratio_default"],  # 前倾比阈值默认 [眼, 耳]（全部设备）
         "ota_current": _ota_batch["current"],
         "ota_phase": _ota_batch["phase"],
         "ota_progress": ({"cur": _ota_batch["progress"]["cur"], "tot": _ota_batch["progress"]["tot"],
@@ -1272,7 +1495,7 @@ if __name__ == "__main__":
     threading.Thread(target=discovery_broadcaster, daemon=True).start()
     print("接收器启动：图像 :20000 + 结果 :20002 + 发现 :20003 → received_images/<设备ID>/image_*.png（按设备分目录）")
     print("Web 控制台: http://localhost:20005（浏览器/手机打开，功能与下方命令等价）")
-    print("命令：s 09:00-11:30,14:00-18:00 设置时段(全部) | s @2/a1b2c3 ... 指定设备 | s clear 清空 | ota 升级全部 | ota list 设备表 | ota 2/a1b2c3 指定设备 | ota on/off 自动检测 | img 图像保存设置 | alert repeat|once 不良提醒模式 | Ctrl+C 退出")
+    print("命令：s 09:00-11:30,14:00-18:00 设置时段(全部) | s @2/a1b2c3 ... 指定设备 | s clear 清空 | ota 升级全部 | ota list 设备表 | ota 2/a1b2c3 指定设备 | ota on/off 自动检测 | img 图像保存设置 | alert repeat|once|off 不良提醒模式 | ratio 1.5 1.5 35 35 前倾比+倾角阈值 | Ctrl+C 退出")
     try:
         while True:
             handle_command(input().strip())

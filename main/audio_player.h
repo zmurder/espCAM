@@ -52,4 +52,19 @@ esp_err_t audio_player_play_posture_alert(posture_result_t posture_result);
  */
 esp_err_t audio_player_deinit(void);
 
+/**
+ * @brief 挂起音频（OTA 等需彻底静音的场景）
+ *        先置标志让正在播放的循环下一块就退出，再写静音清 DMA，最后关 I2S 通道
+ *        （BCLK/WS 停止 → MAX98357 停止转换，避免下载期间喇叭"哒哒"响）；
+ *        挂起期间新的播放请求直接拒绝，不会再有声音
+ * @return esp_err_t
+ */
+esp_err_t audio_player_suspend(void);
+
+/**
+ * @brief 恢复音频（挂起后 OTA 失败/取消时调用；OTA 成功会重启进新固件，无需恢复）
+ * @return esp_err_t
+ */
+esp_err_t audio_player_resume(void);
+
 #endif /* AUDIO_PLAYER_H */

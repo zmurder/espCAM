@@ -13,8 +13,10 @@
 #include "esp_app_format.h"
 #include "esp_http_client.h"
 #include "esp_ota_ops.h"
+#include "esp_netif.h"
 #include "lwip/inet.h"
 #include "led.h"
+#include "audio_player.h"
 
 #include "udp_camera_client.h"
 #include "posture_model.h"
@@ -418,6 +420,10 @@ static void ota_update_task(void* arg)
     int64_t clen = 0;
 
     ESP_LOGI(TAG, "OTA: 开始下载 %s", url);
+    // 下载期间静音：先挂起音频（中止未播完的提示音 + 关 I2S 通道）。
+    // 否则正在播放的提示音会被 flash 擦写拖长成贯穿整个 OTA 的断续"哒哒"声；
+    // 顺带挡住下面切纯 STA 时断连事件触发的提示音
+    audio_player_suspend();
     // SoftAP+STA 并发共存会拖累 STA 下行吞吐（AP beacon/管理帧占空口、驱动收发竞争）：
     // 下载前切纯 STA。重启进新固件后 app_main 会重新建 APSTA（完整恢复）；
     // 下载失败也保持纯 STA 继续检测（热点暂缺，重启即恢复）
@@ -425,8 +431,20 @@ static void ota_update_task(void* arg)
         if (esp_wifi_set_mode(WIFI_MODE_STA) == ESP_OK) {
             esp_wifi_start();
             esp_wifi_set_ps(WIFI_PS_NONE);  // 重启 WiFi 后再设一次（防回默认省电）
-            vTaskDelay(pdMS_TO_TICKS(3000));  // 等 STA 重连拿到 IP
-            ESP_LOGI(TAG, "OTA: 已切纯 STA（SoftAP 暂停，重启后恢复）");
+            // 等 STA 真正重新拿到 IP 再下载：切模式会触发重关联+DHCP（WPA3 下实测可超过
+            // 3.7s），盲等固定时长会抢跑 → connect() "Host is unreachable"。轮询最多 20s
+            esp_netif_t* sta_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+            bool ip_ok = false;
+            for (int i = 0; i < 100 && sta_netif != NULL; i++) {
+                esp_netif_ip_info_t ipi;
+                if (esp_netif_get_ip_info(sta_netif, &ipi) == ESP_OK && ipi.ip.addr != 0) {
+                    ip_ok = true;
+                    break;
+                }
+                vTaskDelay(pdMS_TO_TICKS(200));
+            }
+            ESP_LOGI(TAG, "OTA: 已切纯 STA（SoftAP 暂停，重启后恢复），IP %s",
+                     ip_ok ? "就绪" : "等待超时（仍尝试下载）");
         }
         else {
             esp_wifi_start();  // 切换失败：按原 APSTA 启动，不阻塞 OTA
@@ -496,7 +514,7 @@ static void ota_update_task(void* arg)
                 ESP_LOGI(TAG, "OTA: 进度 %d/%lld KB（累计等待网络 %lld ms / 写 flash %lld ms）",
                          total / 1024, (long long)(clen / 1024), (long long)(net_us / 1000), (long long)(flash_us / 1000));
                 char prog[56];
-                int plen = snprintf(prog, sizeof(prog), "ESPCAM_OTA_PROGRESS %d %lld", total, (long long)clen);
+                snprintf(prog, sizeof(prog), "ESPCAM_OTA_PROGRESS %d %lld", total, (long long)clen);
                 push_disc_text(prog);
                 last_log = total;
             }
@@ -544,17 +562,20 @@ static void ota_update_task(void* arg)
     snprintf(emsg, sizeof(emsg), "ESPCAM_OTA_ERR %s", esp_err_to_name(err));
     push_disc_text(emsg);
     free(url);
+    audio_player_resume();  // OTA 失败：恢复音频（成功路径会重启进新固件，无需恢复）
     s_ota_running = false;
     vTaskDelete(NULL);
 }
 
 /**
- * @brief UDP 20003 服务任务：自动发现 + 检测时间段设置/查询 + 提醒模式设置 + OTA 触发
- *  - ESPCAM_DISCOVER              → 学习源 IP 为发送目标 + 回 "ESPCAM_ACK <设备ID> <版本> <sha8> <提醒模式>"
+ * @brief UDP 20003 服务任务：自动发现 + 检测时间段设置/查询 + 提醒模式设置 + 前倾比阈值设置 + OTA 触发
+ *  - ESPCAM_DISCOVER              → 学习源 IP 为发送目标 + 回 "ESPCAM_ACK <设备ID> <版本> <sha8> <提醒模式> <眼阈值> <耳阈值>"
  *  - ESPCAM_SCHED_GET             → 回当前调度状态
  *  - ESPCAM_SCHED_SET n HH:MM …   → 设置时间段（写 NVS）+ 回状态；解析失败回 ESPCAM_SCHED_ERR 原因
  *  - ESPCAM_ALERT_SET 0|1         → 设置不良提醒模式（写 NVS）+ 回 ESPCAM_ALERT_STATE
  *  - ESPCAM_ALERT_GET             → 回 ESPCAM_ALERT_STATE 0|1
+ *  - ESPCAM_RATIO_SET eye ear [tilt1 tilt2] → 设置眼/耳前倾比阈值（0.2~10）与可选歪头倾角（10~80 度）+ 回 ESPCAM_RATIO_STATE；失败回 ESPCAM_RATIO_ERR
+ *  - ESPCAM_RATIO_GET             → 回 ESPCAM_RATIO_STATE eye ear eyeTilt earTilt
  *  - ESPCAM_OTA_START http://…    → 回 ESPCAM_OTA_STARTED 并启动下载任务（PC 的 IP 动态）
  */
 static void udp_discovery_task(void* pvParameters)
@@ -600,15 +621,18 @@ static void udp_discovery_task(void* pvParameters)
         if (strcmp(rx, DISCOVERY_REQ) == 0) {
             set_server_ip(src.sin_addr.s_addr);  // 学习 PC 的 IP（已相同则静默）
             // ACK 附带设备 ID（WiFi MAC 后 3 字节 hex，多设备区分）+ 版本号 + ELF SHA256 前 8 位
-            // + 不良提醒模式 0|1（PC 设备表展示；旧 PC 只看前 4 段不受影响）
-            char ack[80];
+            // + 不良提醒模式 0|1|2 + 眼/耳前倾比阈值 + 眼/耳歪头倾角阈值（PC 设备表展示/读取当前值；
+            // 旧 PC 只看前几段不受影响）
+            char ack[112];
             char sha8[9];
             uint8_t mac[6];
             esp_read_mac(mac, ESP_MAC_WIFI_STA);
             esp_app_get_elf_sha256(sha8, sizeof(sha8));
-            int alen = snprintf(ack, sizeof(ack), "ESPCAM_ACK %02x%02x%02x %s %s %d",
+            int alen = snprintf(ack, sizeof(ack), "ESPCAM_ACK %02x%02x%02x %s %s %d %.2f %.2f %.1f %.1f",
                                 mac[3], mac[4], mac[5], APP_VERSION, sha8,
-                                posture_alert_repeat_enabled() ? 1 : 0);
+                                (int)posture_alert_get_mode(),
+                                (double)posture_ratio_eye_min(), (double)posture_ratio_ear_min(),
+                                (double)posture_tilt_eye_max(), (double)posture_tilt_ear_max());
             sendto(sock, ack, alen, 0, (struct sockaddr*)&src, sizeof(src));
         }
         else if (strncmp(rx, "ESPCAM_SCHED_GET", 16) == 0) {
@@ -663,11 +687,12 @@ static void udp_discovery_task(void* pvParameters)
             }
         }
         else if (strncmp(rx, "ESPCAM_ALERT_SET", 16) == 0) {
-            // 不良提醒模式：ESPCAM_ALERT_SET 0|1（0=只播一次，1=连续播），写 NVS 后回执
+            // 不良提醒模式：ESPCAM_ALERT_SET 0|1|2（0=只播一次，1=连续播，2=关闭语音——
+            // 仅不播音，检测/上报照常），写 NVS 后回执
             int mode = -1;
             sscanf(rx + 16, " %d", &mode);
-            if (mode == 0 || mode == 1) {
-                posture_alert_set_repeat(mode == 1);
+            if (mode == POSTURE_ALERT_ONCE || mode == POSTURE_ALERT_REPEAT || mode == POSTURE_ALERT_OFF) {
+                posture_alert_set_mode((posture_alert_mode_t)mode);
                 char rbuf[32];
                 int rlen = snprintf(rbuf, sizeof(rbuf), "ESPCAM_ALERT_STATE %d", mode);
                 sendto(sock, rbuf, rlen, 0, (struct sockaddr*)&src, sizeof(src));
@@ -678,9 +703,39 @@ static void udp_discovery_task(void* pvParameters)
         }
         else if (strncmp(rx, "ESPCAM_ALERT_GET", 16) == 0) {
             char rbuf[32];
-            int rlen = snprintf(rbuf, sizeof(rbuf), "ESPCAM_ALERT_STATE %d",
-                                posture_alert_repeat_enabled() ? 1 : 0);
+            int rlen = snprintf(rbuf, sizeof(rbuf), "ESPCAM_ALERT_STATE %d", (int)posture_alert_get_mode());
             sendto(sock, rbuf, rlen, 0, (struct sockaddr*)&src, sizeof(src));
+        }
+        else if (strncmp(rx, "ESPCAM_RATIO_SET", 16) == 0) {
+            // 检测阈值：ESPCAM_RATIO_SET eye ear [eyeTilt earTilt]（比 0.2~10，倾角 10~80 度），
+            // 写 NVS 后回执；只给 2 个参数时仅改前倾比（倾角保持不变）；解析失败/超范围显式回 ERR
+            float eye = 0.0f, ear = 0.0f, eyet = 0.0f, eart = 0.0f;
+            int n = sscanf(rx + 16, " %f %f %f %f", &eye, &ear, &eyet, &eart);
+            bool ok = false;
+            if (n < 2) {
+                sendto(sock, "ESPCAM_RATIO_ERR bad arg", 24, 0, (struct sockaddr*)&src, sizeof(src));
+            }
+            else {
+                ok = posture_ratio_set(eye, ear);
+                if (ok && n >= 4) {
+                    ok = posture_tilt_set(eyet, eart);  // 倾角超范围时前倾比已生效，回 ERR 提示倾角未动
+                }
+                if (!ok) {
+                    char ebuf[56];
+                    int elen = snprintf(ebuf, sizeof(ebuf), "ESPCAM_RATIO_ERR out of range 0.2~10 / 10~80");
+                    sendto(sock, ebuf, elen, 0, (struct sockaddr*)&src, sizeof(src));
+                }
+                else {
+                    char buf[56];
+                    int len = posture_ratio_build_state(buf, sizeof(buf));
+                    sendto(sock, buf, len, 0, (struct sockaddr*)&src, sizeof(src));  // 回状态即确认
+                }
+            }
+        }
+        else if (strncmp(rx, "ESPCAM_RATIO_GET", 16) == 0) {
+            char buf[48];
+            int len = posture_ratio_build_state(buf, sizeof(buf));
+            sendto(sock, buf, len, 0, (struct sockaddr*)&src, sizeof(src));
         }
     }
 }

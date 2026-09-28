@@ -24,11 +24,42 @@ static const char* TAG = "POSTURE_SCHED";
 #define NVS_NAMESPACE "psched"
 #define NVS_KEY_SLOTS "slots"
 #define NVS_KEY_ALERT_REPEAT "alert_rep"
+#define NVS_KEY_EYE_RATIO "eye_ratio"  // 前倾比阈值（u16 存百分之一，150=1.50）
+#define NVS_KEY_EAR_RATIO "ear_ratio"
+#define NVS_KEY_EYE_TILT "eye_tilt"    // 歪头倾角阈值（u16 存十分之一度，350=35.0°）
+#define NVS_KEY_EAR_TILT "ear_tilt"
+
+// 前倾比阈值合法范围（眼/耳-肩垂直距离÷双眼/耳距；防误输垃圾值）
+#define RATIO_MIN 0.2f
+#define RATIO_MAX 10.0f
+// 默认值分眼/耳两条：耳朵离肩膀更近（分子小）、双耳距又比双眼距宽（分母大），
+// 比值天然远小于眼——两者共用一个阈值必然误报（旧版共用 1.5，耳条件长期把正常坐姿判成前倾）
+#define RATIO_DEFAULT_EYE 1.2f
+#define RATIO_DEFAULT_EAR 0.7f
+
+// 歪头倾斜角阈值合法范围（度；头-肩相对倾斜角，越小越严格）
+#define TILT_MIN 10.0f
+#define TILT_MAX 80.0f
+// 默认值同样分眼/耳：耳朵关键点定位噪声更大、正常耳-肩相对角更小，故耳阈值更严
+#define TILT_DEFAULT_EYE 20.0f
+#define TILT_DEFAULT_EAR 15.0f
 
 static posture_sched_slot_t s_slots[POSTURE_SCHED_MAX_SLOTS];
 static int s_slot_count = 0;   // 已设置段数（0=未设置=全天检测）
 static int s_last_active = -1; // 上次窗口状态：-1=未知（首帧/重同步后），0/1=已知（边沿日志用）
-static bool s_alert_repeat = true;  // 不良提醒模式：true=连续播（默认），false=每轮只播一次
+static posture_alert_mode_t s_alert_mode = POSTURE_ALERT_REPEAT;  // 不良提醒模式（默认连续播）
+
+// 提醒模式名（日志用）
+static const char* alert_mode_str(posture_alert_mode_t m)
+{
+    return m == POSTURE_ALERT_REPEAT ? "repeat" : m == POSTURE_ALERT_ONCE ? "once" : "off";
+}
+// 前倾比阈值：20003 任务写、推理任务读，32 位对齐 float 单字读写无锁安全（同 s_server_ip）
+static float s_eye_ratio_min = RATIO_DEFAULT_EYE;
+static float s_ear_ratio_min = RATIO_DEFAULT_EAR;
+// 歪头倾斜角阈值（度）：同上并发模型
+static float s_eye_tilt_max = TILT_DEFAULT_EYE;
+static float s_ear_tilt_max = TILT_DEFAULT_EAR;
 
 // 纯计算：minute 是否落在任一窗口（start>end 视为跨午夜绕过 00:00）
 static bool calc_in_window(int minute)
@@ -95,32 +126,124 @@ void posture_sched_init(void)
     else {
         ESP_LOGI(TAG, "No schedule in NVS, detection always on");
     }
-    uint8_t rep = 1;
-    if (nvs_get_u8(h, NVS_KEY_ALERT_REPEAT, &rep) == ESP_OK) {
-        s_alert_repeat = rep != 0;
+    // 提醒模式：u8 0=只播一次 / 1=连续播 / 2=关闭（与旧固件的 0|1 兼容；无记录保持默认连续播）
+    uint8_t rep = POSTURE_ALERT_REPEAT;
+    if (nvs_get_u8(h, NVS_KEY_ALERT_REPEAT, &rep) == ESP_OK && rep <= POSTURE_ALERT_OFF) {
+        s_alert_mode = (posture_alert_mode_t)rep;
+    }
+    // 前倾比阈值：u16 百分之一（150=1.50）；无记录保持默认 1.5
+    uint16_t r = 0;
+    if (nvs_get_u16(h, NVS_KEY_EYE_RATIO, &r) == ESP_OK && r >= 20 && r <= 1000) {
+        s_eye_ratio_min = r / 100.0f;
+    }
+    if (nvs_get_u16(h, NVS_KEY_EAR_RATIO, &r) == ESP_OK && r >= 20 && r <= 1000) {
+        s_ear_ratio_min = r / 100.0f;
+    }
+    // 歪头倾角阈值：u16 十分之一度（350=35.0°）；无记录保持默认 35
+    if (nvs_get_u16(h, NVS_KEY_EYE_TILT, &r) == ESP_OK && r >= 100 && r <= 800) {
+        s_eye_tilt_max = r / 10.0f;
+    }
+    if (nvs_get_u16(h, NVS_KEY_EAR_TILT, &r) == ESP_OK && r >= 100 && r <= 800) {
+        s_ear_tilt_max = r / 10.0f;
     }
     nvs_close(h);
-    ESP_LOGI(TAG, "Alert repeat mode: %s", s_alert_repeat ? "repeat" : "once");
+    ESP_LOGI(TAG, "Alert mode: %s", alert_mode_str(s_alert_mode));
+    ESP_LOGI(TAG, "Forward ratio thresholds: eye<%.2f ear<%.2f", (double)s_eye_ratio_min, (double)s_ear_ratio_min);
+    ESP_LOGI(TAG, "Head tilt thresholds: eye>%.1f ear>%.1f (deg)", (double)s_eye_tilt_max, (double)s_ear_tilt_max);
 }
 
-bool posture_alert_repeat_enabled(void)
+posture_alert_mode_t posture_alert_get_mode(void)
 {
-    return s_alert_repeat;
+    return s_alert_mode;
 }
 
-void posture_alert_set_repeat(bool en)
+void posture_alert_set_mode(posture_alert_mode_t mode)
 {
-    s_alert_repeat = en;
+    if (mode != POSTURE_ALERT_ONCE && mode != POSTURE_ALERT_REPEAT && mode != POSTURE_ALERT_OFF) {
+        return;
+    }
+    s_alert_mode = mode;
     nvs_handle_t h;
     if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
-        ESP_ERROR_CHECK(nvs_set_u8(h, NVS_KEY_ALERT_REPEAT, en ? 1 : 0));
+        ESP_ERROR_CHECK(nvs_set_u8(h, NVS_KEY_ALERT_REPEAT, (uint8_t)mode));
         ESP_ERROR_CHECK(nvs_commit(h));
         nvs_close(h);
     }
     else {
         ESP_LOGE(TAG, "NVS open failed, alert mode NOT persisted");
     }
-    ESP_LOGI(TAG, "Alert repeat mode set: %s", en ? "repeat" : "once");
+    ESP_LOGI(TAG, "Alert mode set: %s", alert_mode_str(mode));
+}
+
+float posture_ratio_eye_min(void)
+{
+    return s_eye_ratio_min;
+}
+
+float posture_ratio_ear_min(void)
+{
+    return s_ear_ratio_min;
+}
+
+bool posture_ratio_set(float eye, float ear)
+{
+    if (eye < RATIO_MIN || eye > RATIO_MAX || ear < RATIO_MIN || ear > RATIO_MAX) {
+        return false;
+    }
+    s_eye_ratio_min = eye;
+    s_ear_ratio_min = ear;
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
+        // u16 百分之一（1.50 → 150），无浮点 blob 顾虑；范围已在上面保证 20~1000 内
+        ESP_ERROR_CHECK(nvs_set_u16(h, NVS_KEY_EYE_RATIO, (uint16_t)(eye * 100.0f + 0.5f)));
+        ESP_ERROR_CHECK(nvs_set_u16(h, NVS_KEY_EAR_RATIO, (uint16_t)(ear * 100.0f + 0.5f)));
+        ESP_ERROR_CHECK(nvs_commit(h));
+        nvs_close(h);
+    }
+    else {
+        ESP_LOGE(TAG, "NVS open failed, ratio thresholds NOT persisted");
+    }
+    ESP_LOGI(TAG, "Forward ratio thresholds set: eye<%.2f ear<%.2f", (double)eye, (double)ear);
+    return true;
+}
+
+float posture_tilt_eye_max(void)
+{
+    return s_eye_tilt_max;
+}
+
+float posture_tilt_ear_max(void)
+{
+    return s_ear_tilt_max;
+}
+
+bool posture_tilt_set(float eye_tilt, float ear_tilt)
+{
+    if (eye_tilt < TILT_MIN || eye_tilt > TILT_MAX || ear_tilt < TILT_MIN || ear_tilt > TILT_MAX) {
+        return false;
+    }
+    s_eye_tilt_max = eye_tilt;
+    s_ear_tilt_max = ear_tilt;
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
+        // u16 十分之一度（35.0 → 350）；范围已保证 100~800 内
+        ESP_ERROR_CHECK(nvs_set_u16(h, NVS_KEY_EYE_TILT, (uint16_t)(eye_tilt * 10.0f + 0.5f)));
+        ESP_ERROR_CHECK(nvs_set_u16(h, NVS_KEY_EAR_TILT, (uint16_t)(ear_tilt * 10.0f + 0.5f)));
+        ESP_ERROR_CHECK(nvs_commit(h));
+        nvs_close(h);
+    }
+    else {
+        ESP_LOGE(TAG, "NVS open failed, tilt thresholds NOT persisted");
+    }
+    ESP_LOGI(TAG, "Head tilt thresholds set: eye>%.1f ear>%.1f (deg)", (double)eye_tilt, (double)ear_tilt);
+    return true;
+}
+
+int posture_ratio_build_state(char* buf, int buf_len)
+{
+    return snprintf(buf, buf_len, "ESPCAM_RATIO_STATE %.2f %.2f %.1f %.1f",
+                    (double)s_eye_ratio_min, (double)s_ear_ratio_min,
+                    (double)s_eye_tilt_max, (double)s_ear_tilt_max);
 }
 
 void posture_sched_log_slots(void)

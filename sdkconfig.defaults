@@ -16,8 +16,12 @@ CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
 # 启用 PSRAM（如果硬件支持）
+# 注意模式必须显式指定：ESP32-S3-EYE 的模组是八线 Octal PSRAM；不写 MODE_OCT 时
+# 新生成的 sdkconfig 默认 QUAD → 启动报 "quad_psram: PSRAM chip is not connected"
+# → "Failed to init external RAM" → abort（sdkconfig 不入库，换机器重新生成时必踩）
 CONFIG_ESP32S3_SPIRAM_SUPPORT=y
 CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_SPIRAM_USE_MALLOC=y
 CONFIG_SPIRAM_TYPE_AUTO=y
@@ -48,6 +52,10 @@ CONFIG_ESP_TASK_WDT_TIMEOUT_S=40
 
 # CPU 240MHz（最高频，加速模型推理；SDK 默认仅 160MHz）
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# 编译优化 -O2（性能优先，推理提速；SDK 默认 -Og 除拖慢推理外，
+# 还会触发 GCC 15.2 在 -Og 下编译 esp_lcd 的 internal compiler error）
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
 
 # 日志时间戳使用系统时间：SNTP 对时后（time_sync.c）所有日志带真实日期时间
 CONFIG_LOG_TIMESTAMP_SOURCE_SYSTEM=y
