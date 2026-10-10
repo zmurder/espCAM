@@ -3,15 +3,24 @@
   "idf.openOcdConfigs": [
     "board/esp32s3-builtin.cfg"
   ],
-  "idf.espIdfPath": "C:\\esp\\v6.1\\esp-idf",
-  "idf.toolsPath": "C:\\Espressif\\tools",
-  "idf.pythonInstallPath": "C:\\Espressif\\tools\\python\\v6.1\\venv\\Scripts\\python.exe",
-  "idf.gitPath": "C:\\Users\\zmurd\\AppData\\Local\\Programs\\Git\\cmd\\git.exe",
+  "idf.espIdfPath": "D:\\esp\\v6.1\\esp-idf",
+  "idf.toolsPath": "D:\\esp-tools",
+  "idf.pythonInstallPath": "D:\\esp-tools\\python_env\\idf6.1_py3.13_env\\Scripts\\python.exe",
+  "idf.currentSetup": "D:\\esp\\v6.1\\esp-idf",
+  "idf.eimIdfJsonPath": "D:\\esp-tools\\eim_idf.json",
   "idf.customExtraVars": {
     "IDF_TARGET": "esp32s3",
-    "IDF_TOOLS_PATH": "C:\\Espressif\\tools"
+    "PYTHONUTF8": "1",
+    "IDF_PATH": "D:\\esp\\v6.1\\esp-idf",
+    "IDF_TOOLS_PATH": "D:\\esp-tools",
+    "IDF_PYTHON_ENV_PATH": "D:\\esp-tools\\python_env\\idf6.1_py3.13_env"
   },
+  "clangd.path": "D:\\esp-tools\\tools\\esp-clangd\\esp-21.1.3_20260408\\esp-clangd\\bin\\clangd.exe",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=D:\\esp-tools\\tools\\xtensa-esp-elf\\esp-15.2.0_20251204\\xtensa-esp-elf\\bin\\xtensa-esp32-elf-gcc.exe",
+    "--compile-commands-dir=e:\\Work\\ZYDStudy\\code\\espCAM_WIFI\\build"
+  ],
   "idf.flashType": "UART",
-  "idf.port": "COM8",
-  "idf.currentSetup": "C:\\esp\\v6.1\\esp-idf"
+  "idf.port": "COM13"
 }

@@ -299,7 +299,11 @@ class _QuietHTTPServer(http.server.ThreadingHTTPServer):
     静默为一行提示，不打整段 traceback"""
 
     def handle_error(self, request, client_address):
-        print(f"[ota] HTTP 连接中断（{client_address[0]}，ESP 重启/下载中断时正常）")
+        # 异常类型必须打出来：ESP 那边无论哪种失败都只回一句 "ESPCAM_OTA_ERR ESP_FAIL"，
+        # 无法区分"ESP 自己断开"还是"本机服务端出错"（如读固件文件 I/O 失败）——两者
+        # 排查方向完全相反。ESP 断开会是 ConnectionResetError/BrokenPipeError
+        exc = sys.exc_info()[1]
+        print(f"[ota] HTTP 连接中断（{client_address[0]}）: {type(exc).__name__}: {exc}")
 
 
 def _start_ota_server():

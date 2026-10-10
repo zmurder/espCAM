@@ -88,3 +88,6 @@ received_images/
 # PC receiver runtime state (per-machine, do not commit)
 recv_settings.json
 sched_per_dev.json
+
+# 图片归档脚本（tools/archive_images.sh）的输出目录
+image_archives/

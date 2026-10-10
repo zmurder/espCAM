@@ -385,6 +385,12 @@ void udp_sched_push_state(void)
 
 static volatile bool s_ota_running = false;
 
+// 单次升级内的下载尝试次数与节奏：现场实测链路抖动会让下载刚开始 1~2 秒就断链，
+// 而旧版一次失败即全败、还白搭掉自动升级 3 次机会里的一次——重试一次通常就过去了
+#define OTA_DOWNLOAD_ATTEMPTS 3     // 含首次；失败后重开连接再试
+#define OTA_RETRY_DELAY_MS    3000  // 两次尝试之间的间隔
+#define OTA_SETTLE_MS         1000  // STA 确认就绪后再静置多久才开始下载
+
 // 经 20003 通道向已学习 IP 推送一行文本（OTA 进度/结果）
 static void push_disc_text(const char* text)
 {
@@ -405,6 +411,36 @@ bool udp_ota_in_progress(void)
 }
 
 /**
+ * @brief 等 STA 真正关联上且拿到 IP（最多 timeout_ms），就绪后再静置 OTA_SETTLE_MS。
+ *        只看 netif 里的 IP 不够：模式切换瞬间可能还留着切换前的旧地址，会让下载抢跑建连接、
+ *        撞上随后完成的重关联（现场表现：下载刚开始 1~2 秒就断链，ESP 回 ESPCAM_OTA_ERR ESP_FAIL）。
+ *        返回是否等到就绪；超时仍返回 false，由调用方决定是否继续。
+ */
+static bool ota_wait_sta_ready(int timeout_ms)
+{
+    esp_netif_t* sta_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (sta_netif == NULL) {
+        return false;
+    }
+    bool ready = false;
+    for (int waited = 0; waited < timeout_ms; waited += 200) {
+        wifi_ap_record_t ap;
+        esp_netif_ip_info_t ipi;
+        // 关联成功（未关联时 esp_wifi_sta_get_ap_info 返回错误）+ IP 非 0 才算就绪
+        if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK &&
+            esp_netif_get_ip_info(sta_netif, &ipi) == ESP_OK && ipi.ip.addr != 0) {
+            ready = true;
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+    if (ready) {
+        vTaskDelay(pdMS_TO_TICKS(OTA_SETTLE_MS));  // 静置：等重关联/信道切换彻底跑完
+    }
+    return ready;
+}
+
+/**
  * @brief OTA 下载任务：HTTP 流式下载 → 写入另一 app 分区 → 校验 → 切换启动分区 → 重启。
  *        URL 由 PC 经 20003 广播下发（IP 动态，无需固定）；期间推理照常（共享带宽，下载稍慢）。
  */
@@ -413,11 +449,11 @@ static void ota_update_task(void* arg)
     char* url = (char*)arg;
     // 注意：s_ota_running 已在命令处理分支置位（xTaskCreate 之前），任务体内不再置位
     static char rbuf[4096];  // 下载缓冲（放 BSS，避免大栈）
-    esp_http_client_handle_t client = NULL;
-    esp_ota_handle_t ota_handle = 0;
     esp_err_t err = ESP_FAIL;
     int total = 0;
     int64_t clen = 0;
+    const char* stage = "?";  // 失败阶段：随 ERR 回包给 PC，不接串口也能看出卡在哪一步
+    int attempt = 0;
 
     ESP_LOGI(TAG, "OTA: 开始下载 %s", url);
     // 下载期间静音：先挂起音频（中止未播完的提示音 + 关 I2S 通道）。
@@ -431,20 +467,10 @@ static void ota_update_task(void* arg)
         if (esp_wifi_set_mode(WIFI_MODE_STA) == ESP_OK) {
             esp_wifi_start();
             esp_wifi_set_ps(WIFI_PS_NONE);  // 重启 WiFi 后再设一次（防回默认省电）
-            // 等 STA 真正重新拿到 IP 再下载：切模式会触发重关联+DHCP（WPA3 下实测可超过
-            // 3.7s），盲等固定时长会抢跑 → connect() "Host is unreachable"。轮询最多 20s
-            esp_netif_t* sta_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-            bool ip_ok = false;
-            for (int i = 0; i < 100 && sta_netif != NULL; i++) {
-                esp_netif_ip_info_t ipi;
-                if (esp_netif_get_ip_info(sta_netif, &ipi) == ESP_OK && ipi.ip.addr != 0) {
-                    ip_ok = true;
-                    break;
-                }
-                vTaskDelay(pdMS_TO_TICKS(200));
-            }
-            ESP_LOGI(TAG, "OTA: 已切纯 STA（SoftAP 暂停，重启后恢复），IP %s",
-                     ip_ok ? "就绪" : "等待超时（仍尝试下载）");
+            // 等 STA 关联 + IP 都就绪（切模式会触发重关联+DHCP，WPA3 下实测可超过 3.7s）
+            bool ready = ota_wait_sta_ready(20000);
+            ESP_LOGI(TAG, "OTA: 已切纯 STA（SoftAP 暂停，重启后恢复），STA %s",
+                     ready ? "已就绪" : "等待超时（仍尝试下载）");
         }
         else {
             esp_wifi_start();  // 切换失败：按原 APSTA 启动，不阻塞 OTA
@@ -455,6 +481,18 @@ static void ota_update_task(void* arg)
         // RSSI 诊断：> -60 很好，-60~-70 良好，-70~-80 一般，< -80 弱（低速调制，吞吐骤降）
         ESP_LOGI(TAG, "OTA: WiFi 信号 %d dBm（> -70 正常）", ap_info.rssi);
     }
+    for (attempt = 1; attempt <= OTA_DOWNLOAD_ATTEMPTS; attempt++) {
+        esp_http_client_handle_t client = NULL;  // 每轮独立，失败即清理
+        esp_ota_handle_t ota_handle = 0;
+        err = ESP_FAIL;
+        total = 0;
+        clen = 0;
+        stage = "?";
+        if (attempt > 1) {
+            ESP_LOGW(TAG, "OTA: %d ms 后重试（第 %d/%d 次）",
+                     OTA_RETRY_DELAY_MS, attempt, OTA_DOWNLOAD_ATTEMPTS);
+            vTaskDelay(pdMS_TO_TICKS(OTA_RETRY_DELAY_MS));
+        }
     do {
         esp_http_client_config_t cfg = {
             .url = url,
@@ -462,29 +500,36 @@ static void ota_update_task(void* arg)
         };
         client = esp_http_client_init(&cfg);
         if (client == NULL) {
+            stage = "http初始化";
             ESP_LOGE(TAG, "OTA: http client 初始化失败");
             break;
         }
         err = esp_http_client_open(client, 0);
         if (err != ESP_OK) {
+            stage = "连接";
             ESP_LOGE(TAG, "OTA: 连接失败: %s", esp_err_to_name(err));
             break;
         }
         clen = esp_http_client_fetch_headers(client);
         int status = esp_http_client_get_status_code(client);
         if (status != 200 || clen <= 0) {
+            static char s_http_stage[20];  // OTA 任务单实例运行，静态复用安全
+            snprintf(s_http_stage, sizeof(s_http_stage), "HTTP%d", status);
+            stage = s_http_stage;
             ESP_LOGE(TAG, "OTA: HTTP 状态 %d，长度 %lld（固件不存在？）", status, (long long)clen);
             err = ESP_FAIL;
             break;
         }
         const esp_partition_t* part = esp_ota_get_next_update_partition(NULL);
         if (part == NULL) {
+            stage = "无OTA分区";
             ESP_LOGE(TAG, "OTA: 找不到可写的 app 分区（分区表无 ota 槽？）");
             err = ESP_FAIL;
             break;
         }
         err = esp_ota_begin(part, OTA_SIZE_UNKNOWN, &ota_handle);
         if (err != ESP_OK) {
+            stage = "擦/备分区";
             ESP_LOGE(TAG, "OTA: esp_ota_begin 失败: %s", esp_err_to_name(err));
             break;
         }
@@ -498,6 +543,7 @@ static void ota_update_task(void* arg)
                 break;  // 下完（content-length 已满）
             }
             if (n < 0) {
+                stage = "读超时/断链";
                 ESP_LOGE(TAG, "OTA: 下载中断（超时/网络断开）");
                 err = ESP_FAIL;
                 break;
@@ -506,6 +552,7 @@ static void ota_update_task(void* arg)
             err = esp_ota_write(ota_handle, rbuf, n);  // 首块会校验镜像头（magic）
             flash_us += esp_timer_get_time() - t0;
             if (err != ESP_OK) {
+                stage = "写flash";
                 ESP_LOGE(TAG, "OTA: esp_ota_write 失败: %s", esp_err_to_name(err));
                 break;
             }
@@ -523,12 +570,14 @@ static void ota_update_task(void* arg)
             break;
         }
         if (total != (int)clen) {
+            stage = "长度不符";
             ESP_LOGE(TAG, "OTA: 长度不符 已收 %d 应为 %lld", total, (long long)clen);
             err = ESP_FAIL;
             break;
         }
         err = esp_ota_end(ota_handle);  // 校验镜像完整性
         if (err != ESP_OK) {
+            stage = "镜像校验";
             ESP_LOGE(TAG, "OTA: esp_ota_end 失败: %s（镜像校验未过）", esp_err_to_name(err));
             esp_ota_abort(ota_handle);  // end 失败后须显式 abort 释放
             ota_handle = 0;
@@ -537,6 +586,7 @@ static void ota_update_task(void* arg)
         ota_handle = 0;  // 成功：handle 已被消费，失败路径不可再 abort
         err = esp_ota_set_boot_partition(part);
         if (err != ESP_OK) {
+            stage = "切启动分区";
             ESP_LOGE(TAG, "OTA: 切换启动分区失败: %s", esp_err_to_name(err));
             break;
         }
@@ -551,15 +601,25 @@ static void ota_update_task(void* arg)
         return;  // 不会执行到这
     } while (0);
 
-    // 失败路径：清理并通知 PC（当前固件继续运行，不受影响）
-    if (ota_handle != 0 && err != ESP_OK) {
-        esp_ota_abort(ota_handle);
+        // 本轮失败：先释放句柄/连接（否则下一轮会带着上一轮的半截状态重来）
+        if (ota_handle != 0) {
+            esp_ota_abort(ota_handle);  // 释放句柄并抹掉写了一半的镜像
+            ota_handle = 0;
+        }
+        if (client != NULL) {
+            esp_http_client_cleanup(client);
+            client = NULL;
+        }
+        ESP_LOGW(TAG, "OTA: 第 %d/%d 次下载失败（%s: %s，已收 %d/%d KB）",
+                 attempt, OTA_DOWNLOAD_ATTEMPTS, stage, esp_err_to_name(err),
+                 total / 1024, (int)(clen / 1024));
     }
-    if (client != NULL) {
-        esp_http_client_cleanup(client);
-    }
-    char emsg[64];
-    snprintf(emsg, sizeof(emsg), "ESPCAM_OTA_ERR %s", esp_err_to_name(err));
+
+    // 所有尝试都失败：通知 PC 并收尾（当前固件继续运行，不受影响）
+    char emsg[128];
+    // 带上失败阶段和已收字节：PC 端日志里直接可见，不接串口也能判断卡在哪一步
+    snprintf(emsg, sizeof(emsg), "ESPCAM_OTA_ERR %s %s %d/%dKB %d次失败",
+             esp_err_to_name(err), stage, total / 1024, (int)(clen / 1024), OTA_DOWNLOAD_ATTEMPTS);
     push_disc_text(emsg);
     free(url);
     audio_player_resume();  // OTA 失败：恢复音频（成功路径会重启进新固件，无需恢复）
