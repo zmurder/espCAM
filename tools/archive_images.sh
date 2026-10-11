@@ -228,9 +228,11 @@ flush_pkg() {
   if [ "$DO_UPLOAD" = 1 ]; then
     log "  上传 -> $REMOTE"
     # rclone 的传输记录也写进日志文件（-P 进度条仍显示在终端，不污染日志）
+    # 注意：绝不能再加 --log-level——rclone 会直接报 "Can't set -v and --log-level"
+    # 拒绝启动（-v 本身就是设级别为 INFO，两者冲突），表现为秒失败、根本没连服务器
     rclone_log_args=()
     if [ "$LOG_ENABLED" = 1 ]; then
-      rclone_log_args=( --log-file "$LOG_FILE" --log-level INFO )
+      rclone_log_args=( --log-file "$LOG_FILE" )
     fi
     rc=0
     rclone copy -v -P "${rclone_log_args[@]}" "$pkg" "$REMOTE" < /dev/null || rc=$?

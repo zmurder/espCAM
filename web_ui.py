@@ -227,7 +227,7 @@ _PAGE = """<!doctype html>
     <h2>检测阈值（前倾比 + 歪头角度）</h2>
     <div class="sched-now" id="ratioNow">—</div>
     <div class="filter-row" style="margin-bottom:10px">
-      <select id="ratioDev" onchange="renderRatio(cur)"></select>
+      <select id="ratioDev" onchange="renderRatio(cur, true)"></select>
     </div>
     <div class="filter-row">
       <span class="lbl">前倾比</span>
@@ -259,7 +259,7 @@ _PAGE = """<!doctype html>
       </span>
     </h2>
     <div class="filter-row" style="margin-bottom:10px">
-      <select id="imgDev" onchange="renderImg(cur)"></select>
+      <select id="imgDev" onchange="renderImg(cur, true)"></select>
     </div>
     <div class="filter-row">
       <span class="lbl">每</span>
@@ -300,6 +300,7 @@ _PAGE = """<!doctype html>
 /* ---------- 全局状态轮询（设备表/调度/OTA/日志） ---------- */
 let cur = { devices: [], watch: true };
 let stick = true;  // 日志面板是否吸底滚动（用户上翻查看历史时暂停）
+let forceRows = false;  // 发过命令后强制重绘一次设备表（见 cmd：否则设置没生效也会显示成生效）
 
 async function poll() {
   try {
@@ -312,6 +313,10 @@ async function poll() {
 }
 
 async function cmd(c) {
+  // 命令发出后强制重绘一次设备表：下拉这类原生控件在你点选时立刻显示新值，
+  // 若设置其实没生效（设备离线/丢包），"内容没变不重绘"会让它一直停在你的选择上骗人。
+  // 强制重绘后，界面只显示 ESP 确认过的值——没设上就会当场弹回原值。
+  forceRows = true;
   try {
     await fetch('/api/cmd', {
       method: 'POST',
@@ -328,6 +333,14 @@ function esc(t) {
 }
 
 /* 设备下拉填充（schedDev/logDev 共用）：选项变化时才重建，保留当前选择 */
+// 用户是否正在这张卡里操作：焦点落在卡内任意元素上（包括刚点过的按钮）就算"在用"。
+// 在用期间不回填卡里的输入框——否则每 2s 的轮询会把刚填好、还没下发的**其它**输入框
+// 冲回服务端的旧值（在多个框之间来回填时尤其明显，表现为"设了又变回去、要设好几次"）。
+function cardBusy(el) {
+  const c = el.closest('.card');
+  return c && c.contains(document.activeElement);
+}
+
 function fillDevs(sel) {
   const want = ['all'].concat((cur.devices || []).map(d => d.id));
   if (sel.options.length !== want.length || [...sel.options].some((o, i) => o.value !== want[i])) {
@@ -446,7 +459,12 @@ function render(s) {
            `<td>${esc(d.ver || '?')}</td><td>${sched}</td><td>${sync}</td><td>${alert}</td><td>${ratio}</td><td>${st}</td><td style="text-align:right">${act2}</td></tr>`;
   }).join('');
   // 内容无变化不重绘：避免 2s 轮询把用户正在展开的下拉/悬停状态打断
-  if (rowsHtml !== lastDevRows) { tb.innerHTML = rowsHtml; lastDevRows = rowsHtml; }
+  // （发过命令的那一轮例外，见 cmd——否则设置没生效时界面会一直显示你选的值）
+  if (rowsHtml !== lastDevRows || forceRows) {
+    tb.innerHTML = rowsHtml;
+    lastDevRows = rowsHtml;
+    forceRows = false;
+  }
   document.getElementById('devEmpty').style.display = (s.devices || []).length ? 'none' : 'block';
 
   // 时段卡：各设备当前调度状态（SCHED_STATE，2s 查询周期）
@@ -507,13 +525,15 @@ function applyRatio() {  // 范围本地预校验（与 ESP 一致），不合�
   }
   cmd('ratio ' + ratioTarget() + e + ' ' + r + ' ' + t1 + ' ' + t2);
 }
-function fillRatioDefault() {  // 把默认值填入输入框（不直接下发，确认后点"下发设置"）
-  document.getElementById('eyeThrInput').value = 1.5;
-  document.getElementById('earThrInput').value = 1.5;
-  document.getElementById('eyeTiltInput').value = 35;
-  document.getElementById('earTiltInput').value = 35;
+function fillRatioDefault() {  // 把出厂默认值填入输入框（不直接下发，确认后点"下发设置"）
+  // 与接收器 _THR_DEFAULT 一致：眼/耳是分开的。原来填 1.5/1.5/35/35 是共用阈值时代的
+  // 残留，跟真实默认对不上，点它会填进一组"看着像默认、其实是别的值"
+  document.getElementById('eyeThrInput').value = 1.2;
+  document.getElementById('earThrInput').value = 0.7;
+  document.getElementById('eyeTiltInput').value = 20;
+  document.getElementById('earTiltInput').value = 15;
 }
-function renderRatio(s) {  // 当前生效值 + 输入框预填所选目标的当前阈值（正在输入时不打扰）
+function renderRatio(s, force) {  // 当前生效值 + 输入框预填所选目标的当前阈值（force=切换目标时强制回填）
   fillDevs(document.getElementById('ratioDev'));
   const t = document.getElementById('ratioDev').value;
   const dflt = s.ratio_default || [1.2, 0.7, 20, 15];
@@ -527,7 +547,10 @@ function renderRatio(s) {  // 当前生效值 + 输入框预填所选目标的�
     ? `当前: ${esc(t)} 眼&lt;${ve.toFixed(2)} 耳&lt;${vr.toFixed(2)} 倾角${vt1.toFixed(0)}°/${vt2.toFixed(0)}°`
     : `当前: 默认 眼&lt;${ve.toFixed(2)} 耳&lt;${vr.toFixed(2)} 倾角${vt1.toFixed(0)}°/${vt2.toFixed(0)}°` +
       (dev ? ' <span class="dim">（旧固件未上报）</span>' : '');
-  const f = (id, v) => { const el = document.getElementById(id); if (document.activeElement !== el) el.value = v; };
+  const f = (id, v) => {
+    const el = document.getElementById(id);
+    if (force || !cardBusy(el)) el.value = v;   // 正在填这张卡时别打断（见 cardBusy）
+  };
   f('eyeThrInput', ve); f('earThrInput', vr); f('eyeTiltInput', vt1); f('earTiltInput', vt2);
 }
 
@@ -556,14 +579,14 @@ function resetImgDev() {  // 仅对单台有意义：清除其专属，恢复跟
   if (d && d !== 'all') cmd('img reset @' + d);
 }
 function imgSaveDesc(n) { return n > 0 ? `每 ${n} 帧存 1 帧` : '不保存'; }
-function renderImg(s) {
+function renderImg(s, force) {
   fillDevs(document.getElementById('imgDev'));
   const cfg = imgSelCfg(s);
   document.getElementById('imgKpBtn').textContent = '关键点叠加: ' + (cfg.draw_kp ? '开' : '关');
   document.getElementById('imgSaveBtn').textContent = '保存图片: ' + ((cfg.save_n ?? 10) > 0 ? '开' : '关');
   document.getElementById('imgPeopleBtn').textContent = '仅有人帧: ' + (cfg.people ? '开' : '关');
   const inp = document.getElementById('imgSaveN');
-  if (document.activeElement !== inp) inp.value = cfg.save_n ?? 10;  // 正在输入时不打扰
+  if (force || !cardBusy(inp)) inp.value = cfg.save_n ?? 10;  // 正在填这张卡时别打断（见 cardBusy）
   const cust = s.img_custom || [];
   document.getElementById('imgNow').innerHTML =
     Object.entries(s.img?.devices || {}).map(([k, v]) =>
